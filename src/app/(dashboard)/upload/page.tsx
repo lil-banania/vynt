@@ -36,15 +36,11 @@ const UploadPage = () => {
           throw new Error("Impossible de récupérer l'utilisateur.");
         }
 
-        const { data: profile, error: profileError } = await supabase
+        const { data: profile } = await supabase
           .from("profiles")
-          .select("organization_id, full_name, email")
+          .select("organization_id, full_name")
           .eq("id", user.id)
           .maybeSingle();
-
-        if (profileError) {
-          throw new Error("Impossible de récupérer votre organisation.");
-        }
 
         let organizationId = profile?.organization_id ?? null;
 
