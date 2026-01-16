@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import {
   LayoutGrid,
   Upload,
@@ -17,16 +18,16 @@ type DashboardLayoutProps = {
 const DashboardLayout = async ({ children }: DashboardLayoutProps) => {
   const supabase = await createClient();
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!user) {
     redirect("/login");
   }
 
   const userLabel =
-    session.user.user_metadata?.full_name ||
-    session.user.email ||
+    user.user_metadata?.full_name ||
+    user.email ||
     "Utilisateur";
 
   const signOut = async () => {
@@ -43,27 +44,27 @@ const DashboardLayout = async ({ children }: DashboardLayoutProps) => {
           Vynt
         </div>
         <nav className="space-y-1 text-sm">
-          <a
+          <Link
             href="/dashboard"
             className="flex items-center gap-3 rounded-md px-3 py-2 text-slate-700 transition hover:bg-slate-100"
           >
             <LayoutGrid className="h-4 w-4" />
             Dashboard
-          </a>
-          <a
+          </Link>
+          <Link
             href="/upload"
             className="flex items-center gap-3 rounded-md px-3 py-2 text-slate-700 transition hover:bg-slate-100"
           >
             <Upload className="h-4 w-4" />
             Upload
-          </a>
-          <a
+          </Link>
+          <Link
             href="/settings"
             className="flex items-center gap-3 rounded-md px-3 py-2 text-slate-700 transition hover:bg-slate-100"
           >
             <Settings className="h-4 w-4" />
             Settings
-          </a>
+          </Link>
         </nav>
       </aside>
 

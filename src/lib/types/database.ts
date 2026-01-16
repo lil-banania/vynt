@@ -6,6 +6,7 @@ export type AuditStatus =
   | "in_progress"
   | "completed"
   | "published";
+export type AnomalyStatus = "detected" | "verified" | "resolved" | "dismissed";
 export type AnomalyCategory =
   | "zombie_subscription"
   | "unbilled_usage"
@@ -19,7 +20,14 @@ export type UserRole =
   | "member"
   | "viewer"
   | "vynt_admin";
-export type FileType = "ledger" | "invoices" | "payments" | "customers" | "other";
+export type FileType =
+  | "usage_logs"
+  | "stripe_export"
+  | "ledger"
+  | "invoices"
+  | "payments"
+  | "customers"
+  | "other";
 
 export type Organization = {
   id: string;
@@ -65,7 +73,7 @@ export type Anomaly = {
   audit_id: string;
   category: AnomalyCategory;
   customer_id: string | null;
-  status: AuditStatus;
+  status: AnomalyStatus;
   confidence: AnomalyConfidence;
   annual_impact: number | null;
   monthly_impact: number | null;

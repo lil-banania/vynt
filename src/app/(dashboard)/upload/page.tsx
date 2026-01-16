@@ -36,14 +36,15 @@ const UploadPage = () => {
           throw new Error("Impossible de récupérer l'utilisateur.");
         }
 
+        // Récupérer le profil pour obtenir organization_id
         const { data: profile, error: profileError } = await supabase
           .from("profiles")
           .select("organization_id")
           .eq("id", user.id)
           .single();
 
-        if (profileError) {
-          throw new Error("Impossible de récupérer le profil utilisateur.");
+        if (profileError || !profile?.organization_id) {
+          throw new Error("Impossible de récupérer votre organisation.");
         }
 
         const { data: audit, error } = await supabase
@@ -51,7 +52,7 @@ const UploadPage = () => {
           .insert({
             status: "pending",
             created_by: user.id,
-            organization_id: profile?.organization_id,
+            organization_id: profile.organization_id,
             created_at: new Date().toISOString(),
           })
           .select("id")

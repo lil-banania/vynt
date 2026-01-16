@@ -20,6 +20,16 @@ export const middleware = async (request: NextRequest) => {
 
   const { response, user, supabase } = await updateSession(request);
 
+  if (pathname === "/") {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = "/dashboard";
+    const redirectResponse = NextResponse.redirect(redirectUrl);
+    response.cookies
+      .getAll()
+      .forEach((cookie) => redirectResponse.cookies.set(cookie));
+    return redirectResponse;
+  }
+
   if (!isProtected || isPublic) {
     return response;
   }
