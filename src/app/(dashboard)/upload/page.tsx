@@ -27,79 +27,20 @@ const UploadPage = () => {
 
     const createAudit = async () => {
       try {
-        const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
+        const response = await fetch("/api/audits/create", {
+          method: "POST",
+        });
+        const data = await response.json().catch(() => null);
 
-        if (userError || !user) {
-          throw new Error("Impossible de récupérer l'utilisateur.");
-        }
-
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("organization_id, full_name")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        let organizationId = profile?.organization_id ?? null;
-
-        if (!organizationId) {
-          if (!user.email) {
-            throw new Error("Impossible de récupérer votre organisation.");
-          }
-
-          const fallbackName =
-            profile?.full_name ||
-            user.user_metadata?.full_name ||
-            user.email.split("@")[0] ||
-            "New Organization";
-
-          const { data: organization, error: orgError } = await supabase
-            .from("organizations")
-            .insert({ name: fallbackName })
-            .select("id")
-            .single();
-
-          if (orgError || !organization) {
-            throw new Error("Impossible de récupérer votre organisation.");
-          }
-
-          const { error: profileUpsertError } = await supabase
-            .from("profiles")
-            .upsert({
-              id: user.id,
-              email: user.email,
-              full_name:
-                profile?.full_name ?? user.user_metadata?.full_name ?? null,
-              organization_id: organization.id,
-              role: "member",
-            });
-
-          if (profileUpsertError) {
-            throw new Error("Impossible de récupérer votre organisation.");
-          }
-
-          organizationId = organization.id;
-        }
-
-        const { data: audit, error } = await supabase
-          .from("audits")
-          .insert({
-            status: "pending",
-            created_by: user.id,
-            organization_id: organizationId,
-            created_at: new Date().toISOString(),
-          })
-          .select("id")
-          .single();
-
-        if (error || !audit) {
-          throw new Error("Impossible de créer l'audit.");
+        if (!response.ok) {
+          throw new Error(
+            data?.error ??
+              "Une erreur est survenue lors de la création de l'audit."
+          );
         }
 
         if (isMounted) {
-          setAuditId(audit.id);
+          setAuditId(data?.auditId ?? null);
         }
       } catch (error) {
         if (isMounted) {
@@ -121,7 +62,7 @@ const UploadPage = () => {
     return () => {
       isMounted = false;
     };
-  }, [supabase]);
+  }, []);
 
   const handleStartAnalysis = async () => {
     if (!auditId || !usageUploaded || !stripeUploaded) {
