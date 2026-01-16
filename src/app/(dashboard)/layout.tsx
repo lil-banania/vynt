@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
+import { Profile } from "@/lib/types/database";
 import { Button } from "@/components/ui/button";
 
 type DashboardLayoutProps = {
@@ -25,10 +26,16 @@ const DashboardLayout = async ({ children }: DashboardLayoutProps) => {
     redirect("/login");
   }
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id, role")
+    .eq("id", user.id)
+    .single<Profile>();
+
   const userLabel =
-    user.user_metadata?.full_name ||
-    user.email ||
-    "Utilisateur";
+    user.user_metadata?.full_name || user.email || "Utilisateur";
+
+  const isAdmin = profile?.role === "vynt_admin";
 
   const signOut = async () => {
     "use server";
@@ -58,6 +65,15 @@ const DashboardLayout = async ({ children }: DashboardLayoutProps) => {
             <Upload className="h-4 w-4" />
             Upload
           </Link>
+          {isAdmin && (
+            <Link
+              href="/admin"
+              className="flex items-center gap-3 rounded-md px-3 py-2 text-slate-700 transition hover:bg-slate-100"
+            >
+              <Settings className="h-4 w-4" />
+              Admin
+            </Link>
+          )}
           <Link
             href="/settings"
             className="flex items-center gap-3 rounded-md px-3 py-2 text-slate-700 transition hover:bg-slate-100"

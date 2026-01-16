@@ -46,6 +46,9 @@ const statusBadgeVariant = (status: Audit["status"]) => {
   if (status === "published") {
     return "secondary";
   }
+  if (status === "processing" || status === "review") {
+    return "default";
+  }
   return "outline";
 };
 
@@ -89,7 +92,7 @@ const DashboardPage = async ({ searchParams }: DashboardPageProps) => {
     .select(
       "id, organization_id, status, audit_period_start, audit_period_end, total_anomalies, annual_revenue_at_risk"
     )
-    .eq("status", "published");
+    .order("created_at", { ascending: false });
 
   if (!isAdmin) {
     auditsQuery.eq("organization_id", profile.organization_id);
@@ -112,8 +115,8 @@ const DashboardPage = async ({ searchParams }: DashboardPageProps) => {
           </h1>
           <p className="text-sm text-slate-600">
             {isAdmin
-              ? "Viewing all published audits."
-              : "Published audits for your organization."}
+              ? "Viewing all audits across organizations."
+              : "Audits for your organization, including those in progress."}
           </p>
         </div>
 
@@ -152,7 +155,7 @@ const DashboardPage = async ({ searchParams }: DashboardPageProps) => {
         <Card className="border-slate-200">
           <CardHeader>
             <CardTitle className="text-base font-semibold text-slate-900">
-              No published audits yet
+              No audits yet
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm text-slate-600">
