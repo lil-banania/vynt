@@ -36,15 +36,55 @@ const UploadPage = () => {
           throw new Error("Impossible de récupérer l'utilisateur.");
         }
 
-        // Récupérer le profil pour obtenir organization_id
         const { data: profile, error: profileError } = await supabase
           .from("profiles")
-          .select("organization_id")
+          .select("organization_id, full_name, email")
           .eq("id", user.id)
-          .single();
+          .maybeSingle();
 
-        if (profileError || !profile?.organization_id) {
+        if (profileError) {
           throw new Error("Impossible de récupérer votre organisation.");
+        }
+
+        let organizationId = profile?.organization_id ?? null;
+
+        if (!organizationId) {
+          if (!user.email) {
+            throw new Error("Impossible de récupérer votre organisation.");
+          }
+
+          const fallbackName =
+            profile?.full_name ||
+            user.user_metadata?.full_name ||
+            user.email.split("@")[0] ||
+            "New Organization";
+
+          const { data: organization, error: orgError } = await supabase
+            .from("organizations")
+            .insert({ name: fallbackName })
+            .select("id")
+            .single();
+
+          if (orgError || !organization) {
+            throw new Error("Impossible de récupérer votre organisation.");
+          }
+
+          const { error: profileUpsertError } = await supabase
+            .from("profiles")
+            .upsert({
+              id: user.id,
+              email: user.email,
+              full_name:
+                profile?.full_name ?? user.user_metadata?.full_name ?? null,
+              organization_id: organization.id,
+              role: "member",
+            });
+
+          if (profileUpsertError) {
+            throw new Error("Impossible de récupérer votre organisation.");
+          }
+
+          organizationId = organization.id;
         }
 
         const { data: audit, error } = await supabase
@@ -52,7 +92,7 @@ const UploadPage = () => {
           .insert({
             status: "pending",
             created_by: user.id,
-            organization_id: profile.organization_id,
+            organization_id: organizationId,
             created_at: new Date().toISOString(),
           })
           .select("id")

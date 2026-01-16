@@ -1,0 +1,6 @@
+id,customer,amount,status,created
+ch_0001,cus_1001,2900,succeeded,1736505600
+ch_0002,cus_1002,4900,succeeded,1736592000
+ch_0003,cus_1003,9900,failed,1736678400
+ch_0004,cus_1004,1900,succeeded,1736764800
+ch_0005,cus_1005,3900,refunded,1736851200

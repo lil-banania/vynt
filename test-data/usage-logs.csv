@@ -1,0 +1,6 @@
+event_id,customer_id,event_type,timestamp,quantity
+evt_0001,cus_1001,api_call,2025-01-10T09:12:04Z,120
+evt_0002,cus_1001,api_call,2025-01-10T09:45:31Z,80
+evt_0003,cus_1002,seat_added,2025-01-11T14:03:18Z,3
+evt_0004,cus_1003,storage_gb,2025-01-12T11:22:59Z,50
+evt_0005,cus_1004,api_call,2025-01-12T18:10:07Z,200
