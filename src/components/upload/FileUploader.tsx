@@ -9,7 +9,6 @@ import {
   Upload,
 } from "lucide-react";
 
-import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 type FileType = "usage_logs" | "stripe_export";
@@ -133,36 +132,31 @@ const FileUploader = ({
         setPreviewHeaders(headers);
         setPreviewRows(rows.slice(0, 5));
 
-        const supabase = createClient();
-        const filePath = `${auditId}/${fileType}/${Date.now()}-${file.name}`;
-        const { error: uploadError } = await supabase.storage
-          .from("audit-files")
-          .upload(filePath, file, { upsert: false });
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("auditId", auditId);
+        formData.append("fileType", fileType);
+        formData.append("rowCount", String(rows.length));
 
-        if (uploadError) {
-          throw new Error("Échec de l'upload vers le stockage.");
+        const response = await fetch("/api/uploads", {
+          method: "POST",
+          body: formData,
+        });
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          throw new Error(
+            data?.error ?? "Échec de l'upload vers le stockage."
+          );
         }
 
-        const { data: uploadedRecord, error: dbError } = await supabase
-          .from("uploaded_files")
-          .insert({
-            audit_id: auditId,
-            file_type: fileType,
-            file_name: file.name,
-            file_path: filePath,
-            row_count: rows.length,
-            uploaded_at: new Date().toISOString(),
-          })
-          .select("id")
-          .single();
-
-        if (dbError || !uploadedRecord) {
+        if (!data?.fileId) {
           throw new Error("Échec de l'enregistrement du fichier.");
         }
 
         setProgress(100);
         setStatus("success");
-        onUploadComplete(uploadedRecord.id, rows.length);
+        onUploadComplete(data.fileId, rows.length);
       } catch (error) {
         const message =
           error instanceof Error
