@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -8,16 +11,64 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
 
 const LoginPage = () => {
-  const handleSignIn = async () => {
-    const supabase = createClient();
+  const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkSession = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user && isMounted) {
+        router.replace("/upload");
+      }
+    };
+
+    checkSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [router, supabase]);
+
+  const handlePasswordSignIn = async (
+    event: React.FormEvent<HTMLFormElement>
+  ) => {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setErrorMessage(null);
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      setErrorMessage(error.message);
+      setIsSubmitting(false);
+      return;
+    }
+
+    router.replace("/upload");
+  };
+
+  const handleGoogleSignIn = async () => {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/dashboard`,
+        redirectTo: `${window.location.origin}/api/auth/callback?redirectTo=/upload`,
       },
     });
   };
@@ -34,10 +85,48 @@ const LoginPage = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          <form className="space-y-4" onSubmit={handlePasswordSignIn}>
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Mot de passe</Label>
+              <Input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+              />
+            </div>
+            {errorMessage && (
+              <p className="text-sm text-rose-600">{errorMessage}</p>
+            )}
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? "Connexion..." : "Se connecter"}
+            </Button>
+          </form>
+          <div className="my-6 text-center text-xs uppercase tracking-wide text-muted-foreground">
+            ou
+          </div>
           <Button
             type="button"
             className="w-full"
-            onClick={handleSignIn}
+            variant="outline"
+            onClick={handleGoogleSignIn}
           >
             Sign in with Google
           </Button>
