@@ -7,6 +7,14 @@ import FileUploader from "@/components/upload/FileUploader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { createClient } from "@/lib/supabase/client";
 
 type UploadStep = "usage" | "stripe" | "review";
@@ -35,7 +43,7 @@ const UploadPage = () => {
         if (!response.ok) {
           throw new Error(
             data?.error ??
-              "Une erreur est survenue lors de la création de l'audit."
+              "An error occurred while creating the audit."
           );
         }
 
@@ -47,7 +55,7 @@ const UploadPage = () => {
           setErrorMessage(
             error instanceof Error
               ? error.message
-              : "Une erreur est survenue lors de la création de l'audit."
+              : "An error occurred while creating the audit."
           );
         }
       } finally {
@@ -78,7 +86,7 @@ const UploadPage = () => {
       .eq("id", auditId);
 
     if (error) {
-      setErrorMessage("Impossible de lancer l'analyse.");
+      setErrorMessage("Unable to start analysis.");
       setIsSubmitting(false);
       return;
     }
@@ -137,13 +145,42 @@ const UploadPage = () => {
       {isCreatingAudit && (
         <Card className="border-slate-200">
           <CardContent className="py-6 text-sm text-slate-600">
-            Création de l'audit en cours...
+            Creating the audit...
           </CardContent>
         </Card>
       )}
 
       {!isCreatingAudit && auditId && (
         <>
+          <Card className="border-slate-200 bg-white">
+            <CardHeader>
+              <CardTitle className="text-base font-semibold">
+                Review &amp; Submit
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm text-slate-600">
+                {usageUploaded && stripeUploaded
+                  ? "Both files are ready."
+                  : "Please upload both files to continue."}
+              </div>
+              <Button
+                type="button"
+                size="lg"
+                className="w-full sm:w-auto"
+                onClick={handleStartAnalysis}
+                disabled={
+                  !usageUploaded ||
+                  !stripeUploaded ||
+                  isSubmitting ||
+                  isSubmitted
+                }
+              >
+                {isSubmitting ? "Starting..." : "Start Analysis"}
+              </Button>
+            </CardContent>
+          </Card>
+
           <div className="grid gap-6 lg:grid-cols-2">
             <Card className="border-slate-200">
               <CardHeader className="pb-4">
@@ -175,52 +212,35 @@ const UploadPage = () => {
               </CardContent>
             </Card>
           </div>
-
-          <Card className="border-slate-200">
-            <CardHeader>
-              <CardTitle className="text-base font-semibold">
-                Review &amp; Submit
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-slate-600">
-                {usageUploaded && stripeUploaded
-                  ? "Les deux fichiers sont prêts."
-                  : "Veuillez uploader les deux fichiers pour continuer."}
-              </div>
-              <Button
-                type="button"
-                onClick={handleStartAnalysis}
-                disabled={
-                  !usageUploaded ||
-                  !stripeUploaded ||
-                  isSubmitting ||
-                  isSubmitted
-                }
-              >
-                {isSubmitting ? "Démarrage..." : "Start Analysis"}
-              </Button>
-            </CardContent>
-          </Card>
         </>
       )}
 
-      {isSubmitted && (
-        <Card className="border-emerald-200 bg-emerald-50">
-          <CardContent className="flex flex-col gap-4 py-6 text-sm text-emerald-700">
-            <p>
-              We'll get in touch in the next 3 days with the results !
-            </p>
+      <Dialog
+        open={isSubmitted}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsSubmitted(false);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Analysis started</DialogTitle>
+            <DialogDescription>
+              We will get back to you within 3 days with the results.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
             <Button
               type="button"
               variant="secondary"
               onClick={() => router.push("/dashboard")}
             >
-              Retourner au dashboard
+              Back to dashboard
             </Button>
-          </CardContent>
-        </Card>
-      )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

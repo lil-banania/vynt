@@ -98,7 +98,7 @@ const LoginPage = () => {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Mot de passe</Label>
+              <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
                 type="password"
@@ -116,11 +116,11 @@ const LoginPage = () => {
               className="w-full"
               disabled={isSubmitting}
             >
-              {isSubmitting ? "Connexion..." : "Se connecter"}
+              {isSubmitting ? "Signing in..." : "Sign in"}
             </Button>
           </form>
           <div className="my-6 text-center text-xs uppercase tracking-wide text-muted-foreground">
-            ou
+            or
           </div>
           <Button
             type="button"

@@ -15,6 +15,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { Anomaly, Audit, Profile } from "@/lib/types/database";
 
@@ -39,7 +40,9 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
+  const adminSupabase = createAdminClient();
+  const dataClient = adminSupabase ?? supabase;
+  const { data: profile } = await dataClient
     .from("profiles")
     .select("id, organization_id, role")
     .eq("id", user.id)
@@ -49,7 +52,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
     redirect("/login");
   }
 
-  const { data: audit } = await supabase
+  const { data: audit } = await dataClient
     .from("audits")
     .select(
       "id, organization_id, status, audit_period_start, audit_period_end, total_anomalies, annual_revenue_at_risk, created_at, published_at, created_by"
@@ -67,13 +70,13 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
     redirect("/dashboard");
   }
 
-  const { data: organization } = await supabase
+  const { data: organization } = await dataClient
     .from("organizations")
     .select("id, name")
     .eq("id", audit.organization_id)
     .single<Organization>();
 
-  const { data: anomaliesData } = await supabase
+  const { data: anomaliesData } = await dataClient
     .from("anomalies")
     .select(
       "id, audit_id, category, customer_id, status, confidence, annual_impact, monthly_impact, description, root_cause, recommendation, metadata, detected_at"

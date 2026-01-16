@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import AdminAuditTable from "@/components/dashboard/AdminAuditTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { Audit, Profile } from "@/lib/types/database";
 
@@ -27,7 +28,9 @@ const AdminPage = async () => {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
+  const adminSupabase = createAdminClient();
+  const dataClient = adminSupabase ?? supabase;
+  const { data: profile } = await dataClient
     .from("profiles")
     .select("id, organization_id, role")
     .eq("id", user.id)
@@ -37,7 +40,7 @@ const AdminPage = async () => {
     redirect("/dashboard");
   }
 
-  const { data: organizationsData } = await supabase
+  const { data: organizationsData } = await dataClient
     .from("organizations")
     .select("id, name")
     .returns<Organization[]>();
@@ -46,7 +49,7 @@ const AdminPage = async () => {
     organizations.map((org) => [org.id, org.name])
   );
 
-  const { data: auditsData } = await supabase
+  const { data: auditsData } = await dataClient
     .from("audits")
     .select(
       "id, organization_id, status, audit_period_start, audit_period_end, total_anomalies, annual_revenue_at_risk, created_at, published_at, created_by"
@@ -57,7 +60,7 @@ const AdminPage = async () => {
   const audits = auditsData ?? [];
   const auditIds = audits.map((audit) => audit.id);
 
-  const { data: uploadedFilesData } = await supabase
+  const { data: uploadedFilesData } = await dataClient
     .from("uploaded_files")
     .select("id, audit_id, file_name, file_type")
     .in("audit_id", auditIds)

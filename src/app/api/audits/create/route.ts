@@ -12,7 +12,7 @@ export async function POST() {
 
   if (userError || !user) {
     return NextResponse.json(
-      { error: "Impossible de récupérer l'utilisateur." },
+      { error: "Unable to retrieve the user." },
       { status: 401 }
     );
   }
@@ -22,7 +22,7 @@ export async function POST() {
 
   if (!supabaseUrl || !serviceRoleKey) {
     return NextResponse.json(
-      { error: "Configuration serveur manquante." },
+      { error: "Missing server configuration." },
       { status: 500 }
     );
   }
@@ -39,7 +39,7 @@ export async function POST() {
 
   if (profileError) {
     return NextResponse.json(
-      { error: "Impossible de récupérer votre organisation." },
+      { error: "Unable to retrieve your organization." },
       { status: 500 }
     );
   }
@@ -49,7 +49,7 @@ export async function POST() {
   if (!organizationId) {
     if (!user.email) {
       return NextResponse.json(
-        { error: "Impossible de récupérer votre organisation." },
+        { error: "Unable to retrieve your organization." },
         { status: 400 }
       );
     }
@@ -68,7 +68,7 @@ export async function POST() {
 
     if (orgError || !organization) {
       return NextResponse.json(
-        { error: "Impossible de récupérer votre organisation." },
+        { error: "Unable to retrieve your organization." },
         { status: 500 }
       );
     }
@@ -85,7 +85,7 @@ export async function POST() {
 
     if (profileUpsertError) {
       return NextResponse.json(
-        { error: "Impossible de récupérer votre organisation." },
+        { error: "Unable to retrieve your organization." },
         { status: 500 }
       );
     }
@@ -106,7 +106,7 @@ export async function POST() {
 
   if (auditError || !audit) {
     return NextResponse.json(
-      { error: "Impossible de créer l'audit." },
+      { error: "Unable to create the audit." },
       { status: 500 }
     );
   }

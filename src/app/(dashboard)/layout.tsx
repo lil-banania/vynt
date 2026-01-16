@@ -8,6 +8,7 @@ import {
   LogOut,
 } from "lucide-react";
 
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { Profile } from "@/lib/types/database";
 import { Button } from "@/components/ui/button";
@@ -26,16 +27,18 @@ const DashboardLayout = async ({ children }: DashboardLayoutProps) => {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
+  const adminSupabase = createAdminClient();
+  const { data: profile } = await (adminSupabase ?? supabase)
     .from("profiles")
     .select("id, role")
     .eq("id", user.id)
     .single<Profile>();
 
   const userLabel =
-    user.user_metadata?.full_name || user.email || "Utilisateur";
+    user.user_metadata?.full_name || user.email || "User";
 
   const isAdmin = profile?.role === "vynt_admin";
+  const hasProfile = Boolean(profile);
 
   const signOut = async () => {
     "use server";
@@ -82,6 +85,11 @@ const DashboardLayout = async ({ children }: DashboardLayoutProps) => {
             Settings
           </Link>
         </nav>
+        {!hasProfile && (
+          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            Admin access unavailable: user profile could not be loaded.
+          </div>
+        )}
       </aside>
 
       <div className="flex flex-1 flex-col">

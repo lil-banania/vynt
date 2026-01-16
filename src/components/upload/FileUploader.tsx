@@ -77,11 +77,11 @@ const FileUploader = ({
 
   const validateFile = (file: File) => {
     if (!file.name.toLowerCase().endsWith(".csv")) {
-      return "Seuls les fichiers .csv sont acceptés.";
+      return "Only .csv files are accepted.";
     }
 
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      return "Le fichier dépasse la limite de 50MB.";
+      return "The file exceeds the 50MB limit.";
     }
 
     return null;
@@ -119,7 +119,7 @@ const FileUploader = ({
 
         if (missingColumns.length > 0) {
           throw new Error(
-            `Colonnes manquantes : ${missingColumns.join(", ")}.`
+            `Missing columns: ${missingColumns.join(", ")}.`
           );
         }
 
@@ -146,12 +146,12 @@ const FileUploader = ({
 
         if (!response.ok) {
           throw new Error(
-            data?.error ?? "Échec de l'upload vers le stockage."
+            data?.error ?? "Upload to storage failed."
           );
         }
 
         if (!data?.fileId) {
-          throw new Error("Échec de l'enregistrement du fichier.");
+          throw new Error("Failed to save file record.");
         }
 
         setProgress(100);
@@ -161,7 +161,7 @@ const FileUploader = ({
         const message =
           error instanceof Error
             ? error.message
-            : "Une erreur est survenue pendant l'upload.";
+            : "An error occurred during upload.";
         setStatus("error");
         setErrorMessage(message);
       } finally {
@@ -193,7 +193,7 @@ const FileUploader = ({
     <Card className="border-slate-200">
       <CardHeader className="pb-4">
         <CardTitle className="text-base font-semibold text-slate-900">
-          Importer un fichier CSV
+          Upload a CSV file
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -218,17 +218,17 @@ const FileUploader = ({
         >
           <Upload className="mb-3 h-8 w-8 text-slate-500" />
           <p className="text-sm font-medium text-slate-700">
-            Glissez-déposez votre CSV ici
+            Drag and drop your CSV here
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            ou cliquez pour sélectionner un fichier (max 50MB)
+            or click to select a file (max 50MB)
           </p>
           <button
             type="button"
             onClick={handleBrowse}
             className="mt-4 rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
           >
-            Choisir un fichier
+            Choose a file
           </button>
         </div>
 
@@ -236,7 +236,7 @@ const FileUploader = ({
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-sm text-slate-600">
               <FileText className="h-4 w-4" />
-              Upload en cours...
+              Uploading...
             </div>
             <div className="h-2 w-full rounded-full bg-slate-200">
               <div
@@ -250,7 +250,7 @@ const FileUploader = ({
         {status === "success" && (
           <div className="flex items-center gap-2 text-sm text-emerald-600">
             <CheckCircle className="h-4 w-4" />
-            Fichier importé avec succès.
+            File uploaded successfully.
           </div>
         )}
 
@@ -264,7 +264,7 @@ const FileUploader = ({
         {previewRows.length > 0 && (
           <div className="rounded-lg border border-slate-200">
             <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-600">
-              Aperçu des 5 premières lignes
+              Preview of the first 5 rows
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-xs text-slate-700">

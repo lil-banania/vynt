@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { Audit, Profile } from "@/lib/types/database";
 
@@ -52,6 +53,25 @@ const statusBadgeVariant = (status: Audit["status"]) => {
   return "outline";
 };
 
+const statusLabel = (status: Audit["status"]) => {
+  if (status === "processing" || status === "review" || status === "pending") {
+    return "In review";
+  }
+  if (status === "published") {
+    return "Published";
+  }
+  if (status === "completed") {
+    return "Completed";
+  }
+  if (status === "in_progress") {
+    return "In progress";
+  }
+  if (status === "draft") {
+    return "Draft";
+  }
+  return status;
+};
+
 const DashboardPage = async ({ searchParams }: DashboardPageProps) => {
   const supabase = await createClient();
   const {
@@ -62,7 +82,9 @@ const DashboardPage = async ({ searchParams }: DashboardPageProps) => {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
+  const adminSupabase = createAdminClient();
+  const dataClient = adminSupabase ?? supabase;
+  const { data: profile } = await dataClient
     .from("profiles")
     .select("id, organization_id, full_name, role")
     .eq("id", user.id)
@@ -76,8 +98,8 @@ const DashboardPage = async ({ searchParams }: DashboardPageProps) => {
   const selectedOrg = searchParams?.org ?? "all";
 
   const organizationsQuery = isAdmin
-    ? supabase.from("organizations").select("id, name")
-    : supabase
+    ? dataClient.from("organizations").select("id, name")
+    : dataClient
         .from("organizations")
         .select("id, name")
         .eq("id", profile.organization_id);
@@ -87,7 +109,7 @@ const DashboardPage = async ({ searchParams }: DashboardPageProps) => {
   >();
   const organizations = organizationsData ?? [];
 
-  const auditsQuery = supabase
+  const auditsQuery = dataClient
     .from("audits")
     .select(
       "id, organization_id, status, audit_period_start, audit_period_end, total_anomalies, annual_revenue_at_risk"
@@ -186,7 +208,7 @@ const DashboardPage = async ({ searchParams }: DashboardPageProps) => {
                     )}
                   </CardTitle>
                   <Badge variant={statusBadgeVariant(audit.status)}>
-                    {audit.status}
+                    {statusLabel(audit.status)}
                   </Badge>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm text-slate-600">

@@ -14,7 +14,7 @@ export async function POST(request: Request) {
 
   if (userError || !user) {
     return NextResponse.json(
-      { error: "Impossible de récupérer l'utilisateur." },
+      { error: "Unable to retrieve the user." },
       { status: 401 }
     );
   }
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
 
   if (!supabaseUrl || !serviceRoleKey) {
     return NextResponse.json(
-      { error: "Configuration serveur manquante." },
+      { error: "Missing server configuration." },
       { status: 500 }
     );
   }
@@ -37,21 +37,21 @@ export async function POST(request: Request) {
 
   if (!(file instanceof File)) {
     return NextResponse.json(
-      { error: "Fichier CSV manquant." },
+      { error: "CSV file is missing." },
       { status: 400 }
     );
   }
 
   if (typeof auditId !== "string" || !auditId) {
     return NextResponse.json(
-      { error: "Audit manquant." },
+      { error: "Audit is missing." },
       { status: 400 }
     );
   }
 
   if (typeof fileType !== "string" || !FILE_TYPES.has(fileType)) {
     return NextResponse.json(
-      { error: "Type de fichier invalide." },
+      { error: "Invalid file type." },
       { status: 400 }
     );
   }
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
 
   if (uploadError) {
     return NextResponse.json(
-      { error: "Échec de l'upload vers le stockage." },
+      { error: "Upload to storage failed." },
       { status: 500 }
     );
   }
@@ -95,7 +95,7 @@ export async function POST(request: Request) {
 
   if (dbError || !uploadedRecord) {
     return NextResponse.json(
-      { error: "Échec de l'enregistrement du fichier." },
+      { error: "Failed to save file record." },
       { status: 500 }
     );
   }
