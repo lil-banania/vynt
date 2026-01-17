@@ -32,19 +32,43 @@ const CATEGORY_CONFIG: Record<
 > = {
   zombie_subscription: {
     label: "Zombie Subscription",
-    color: "#ef4444",
+    color: "#f43f5e",
   },
   unbilled_usage: {
     label: "Unbilled Usage",
-    color: "#f97316",
+    color: "#f59e0b",
   },
   pricing_mismatch: {
     label: "Pricing Mismatch",
-    color: "#eab308",
+    color: "#a855f7",
   },
   duplicate_charge: {
     label: "Duplicate Charge",
-    color: "#3b82f6",
+    color: "#f97316",
+  },
+  failed_payment: {
+    label: "Failed Payment",
+    color: "#ef4444",
+  },
+  high_refund_rate: {
+    label: "High Refund Rate",
+    color: "#ec4899",
+  },
+  dispute_chargeback: {
+    label: "Dispute/Chargeback",
+    color: "#dc2626",
+  },
+  trial_abuse: {
+    label: "Trial Abuse",
+    color: "#eab308",
+  },
+  revenue_leakage: {
+    label: "Revenue Leakage",
+    color: "#06b6d4",
+  },
+  involuntary_churn: {
+    label: "Involuntary Churn",
+    color: "#64748b",
   },
   other: {
     label: "Other",
