@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 
 import AdminAuditTable from "@/components/dashboard/AdminAuditTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { Audit, Profile } from "@/lib/types/database";
 
@@ -28,26 +27,19 @@ const AdminPage = async () => {
     redirect("/login");
   }
 
-  const adminSupabase = createAdminClient();
-  const dataClient = adminSupabase ?? supabase;
-  const { data: profile } = await dataClient
+  const { data: profile } = await supabase
     .from("profiles")
     .select("id, organization_id, role")
     .eq("id", user.id)
-    .single<Profile>();
+    .maybeSingle<Profile>();
 
-  const metadataRole =
-    (user.app_metadata as { role?: string } | undefined)?.role ??
-    (user.user_metadata as { role?: string } | undefined)?.role ??
-    null;
-  const isAdmin =
-    profile?.role === "vynt_admin" || metadataRole === "vynt_admin";
+  const isAdmin = profile?.role === "vynt_admin";
 
   if (!isAdmin) {
     redirect("/dashboard");
   }
 
-  const { data: organizationsData } = await dataClient
+  const { data: organizationsData } = await supabase
     .from("organizations")
     .select("id, name")
     .returns<Organization[]>();
@@ -56,7 +48,7 @@ const AdminPage = async () => {
     organizations.map((org) => [org.id, org.name])
   );
 
-  const { data: auditsData } = await dataClient
+  const { data: auditsData } = await supabase
     .from("audits")
     .select(
       "id, organization_id, status, audit_period_start, audit_period_end, total_anomalies, annual_revenue_at_risk, created_at, published_at, created_by"
@@ -67,11 +59,13 @@ const AdminPage = async () => {
   const audits = auditsData ?? [];
   const auditIds = audits.map((audit) => audit.id);
 
-  const { data: uploadedFilesData } = await dataClient
-    .from("uploaded_files")
-    .select("id, audit_id, file_name, file_type")
-    .in("audit_id", auditIds)
-    .returns<UploadedFile[]>();
+  const { data: uploadedFilesData } = auditIds.length > 0
+    ? await supabase
+        .from("uploaded_files")
+        .select("id, audit_id, file_name, file_type")
+        .in("audit_id", auditIds)
+        .returns<UploadedFile[]>()
+    : { data: [] };
 
   const uploadedFiles = uploadedFilesData ?? [];
 
@@ -93,30 +87,6 @@ const AdminPage = async () => {
     uploaded_files: uploadedFilesByAudit[audit.id] ?? [],
   }));
 
-  const updateStatus = async (formData: FormData) => {
-    "use server";
-    const auditId = String(formData.get("auditId") ?? "");
-    const status = String(formData.get("status") ?? "");
-    if (!auditId || !status) {
-      return;
-    }
-    const serverSupabase = await createClient();
-    await serverSupabase.from("audits").update({ status }).eq("id", auditId);
-  };
-
-  const publishAudit = async (formData: FormData) => {
-    "use server";
-    const auditId = String(formData.get("auditId") ?? "");
-    if (!auditId) {
-      return;
-    }
-    const serverSupabase = await createClient();
-    await serverSupabase
-      .from("audits")
-      .update({ status: "published", published_at: new Date().toISOString() })
-      .eq("id", auditId);
-  };
-
   return (
     <div className="space-y-6">
       <Card className="border-slate-200">
@@ -126,15 +96,11 @@ const AdminPage = async () => {
           </CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-slate-600">
-          Manage audits across all organizations.
+          Manage audits across all organizations. Use Preview to see the client view before publishing.
         </CardContent>
       </Card>
 
-      <AdminAuditTable
-        audits={auditsWithFiles}
-        onUpdateStatus={updateStatus}
-        onPublish={publishAudit}
-      />
+      <AdminAuditTable audits={auditsWithFiles} />
     </div>
   );
 };

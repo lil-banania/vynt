@@ -1,6 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { Eye } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,8 +39,6 @@ type AuditRow = Audit & {
 
 type AdminAuditTableProps = {
   audits: AuditRow[];
-  onUpdateStatus: (formData: FormData) => void;
-  onPublish: (formData: FormData) => void;
 };
 
 const PAGE_SIZE = 10;
@@ -57,13 +58,11 @@ const statusBadgeVariant = (status: AuditStatus) => {
   }
 };
 
-const AdminAuditTable = ({
-  audits,
-  onUpdateStatus,
-  onPublish,
-}: AdminAuditTableProps) => {
+const AdminAuditTable = ({ audits }: AdminAuditTableProps) => {
+  const router = useRouter();
   const [statusFilter, setStatusFilter] = useState<AuditStatus | "all">("all");
   const [page, setPage] = useState(1);
+  const [loadingAuditId, setLoadingAuditId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     return audits.filter((audit) => {
@@ -79,6 +78,28 @@ const AdminAuditTable = ({
     (page - 1) * PAGE_SIZE,
     page * PAGE_SIZE
   );
+
+  const updateStatus = async (auditId: string, status: string) => {
+    setLoadingAuditId(auditId);
+    try {
+      const response = await fetch("/api/audits/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auditId, status }),
+      });
+
+      if (response.ok) {
+        router.refresh();
+      } else {
+        const data = await response.json().catch(() => null);
+        alert(data?.error ?? "Failed to update status.");
+      }
+    } catch {
+      alert("Failed to update status.");
+    } finally {
+      setLoadingAuditId(null);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -115,64 +136,79 @@ const AdminAuditTable = ({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {paginated.map((audit) => (
-              <TableRow key={audit.id}>
-                <TableCell className="font-medium text-slate-900">
-                  {audit.organization_name}
-                </TableCell>
-                <TableCell className="text-slate-600">
-                  {new Date(audit.created_at).toLocaleDateString("en-US")}
-                </TableCell>
-                <TableCell>
-                  <Badge variant={statusBadgeVariant(audit.status)}>
-                    {audit.status}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-slate-600">
-                  {audit.uploaded_files.length === 0 && "No files"}
-                  {audit.uploaded_files.length > 0 && (
-                    <ul className="space-y-1 text-xs text-slate-600">
-                      {audit.uploaded_files.map((file) => (
-                        <li key={file.id}>
-                          {file.file_name}{" "}
-                          <span className="text-slate-400">
-                            ({file.file_type})
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <Button asChild variant="outline" size="sm">
-                      <a href={`/audit/${audit.id}`}>View</a>
-                    </Button>
-                    <form action={onUpdateStatus}>
-                      <input type="hidden" name="auditId" value={audit.id} />
-                      <input type="hidden" name="status" value="processing" />
-                      <Button variant="outline" size="sm" type="submit">
-                        Mark as Processing
+            {paginated.map((audit) => {
+              const isLoading = loadingAuditId === audit.id;
+              return (
+                <TableRow key={audit.id}>
+                  <TableCell className="font-medium text-slate-900">
+                    {audit.organization_name}
+                  </TableCell>
+                  <TableCell className="text-slate-600">
+                    {new Date(audit.created_at).toLocaleDateString("en-US")}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={statusBadgeVariant(audit.status)}>
+                      {audit.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-slate-600">
+                    {audit.uploaded_files.length === 0 && "No files"}
+                    {audit.uploaded_files.length > 0 && (
+                      <ul className="space-y-1 text-xs text-slate-600">
+                        {audit.uploaded_files.map((file) => (
+                          <li key={file.id}>
+                            {file.file_name}{" "}
+                            <span className="text-slate-400">
+                              ({file.file_type})
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button asChild variant="outline" size="sm">
+                        <Link href={`/audit/${audit.id}`}>
+                          <Eye className="mr-1 h-3 w-3" />
+                          Preview
+                        </Link>
                       </Button>
-                    </form>
-                    <form action={onUpdateStatus}>
-                      <input type="hidden" name="auditId" value={audit.id} />
-                      <input type="hidden" name="status" value="review" />
-                      <Button variant="outline" size="sm" type="submit">
-                        Mark as Review
-                      </Button>
-                    </form>
-                    <form action={onPublish}>
-                      <input type="hidden" name="auditId" value={audit.id} />
-                      <Button size="sm" type="submit">
-                        Publish
-                      </Button>
-                    </form>
-                    <AnomalyForm auditId={audit.id} />
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
+                      {audit.status !== "processing" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isLoading}
+                          onClick={() => updateStatus(audit.id, "processing")}
+                        >
+                          {isLoading ? "..." : "Processing"}
+                        </Button>
+                      )}
+                      {audit.status !== "review" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isLoading}
+                          onClick={() => updateStatus(audit.id, "review")}
+                        >
+                          {isLoading ? "..." : "Review"}
+                        </Button>
+                      )}
+                      {audit.status !== "published" && (
+                        <Button
+                          size="sm"
+                          disabled={isLoading}
+                          onClick={() => updateStatus(audit.id, "published")}
+                        >
+                          {isLoading ? "..." : "Publish"}
+                        </Button>
+                      )}
+                      <AnomalyForm auditId={audit.id} />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
             {paginated.length === 0 && (
               <TableRow>
                 <TableCell

@@ -15,14 +15,13 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { Anomaly, Audit, Profile } from "@/lib/types/database";
 
 type AuditDetailPageProps = {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 };
 
 type Organization = {
@@ -31,6 +30,8 @@ type Organization = {
 };
 
 const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
+  const { id } = await params;
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -40,48 +41,45 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
     redirect("/login");
   }
 
-  const adminSupabase = createAdminClient();
-  const dataClient = adminSupabase ?? supabase;
-  const { data: profile } = await dataClient
+  const { data: profile } = await supabase
     .from("profiles")
     .select("id, organization_id, role")
     .eq("id", user.id)
-    .single<Profile>();
+    .maybeSingle<Profile>();
 
   if (!profile) {
     redirect("/login");
   }
 
-  const { data: audit } = await dataClient
+  const isAdmin = profile.role === "vynt_admin";
+
+  const { data: audit } = await supabase
     .from("audits")
     .select(
       "id, organization_id, status, audit_period_start, audit_period_end, total_anomalies, annual_revenue_at_risk, created_at, published_at, created_by"
     )
-    .eq("id", params.id)
-    .single<Audit>();
+    .eq("id", id)
+    .maybeSingle<Audit>();
 
   if (!audit) {
     notFound();
   }
 
-  const metadataRole =
-    (user.app_metadata as { role?: string } | undefined)?.role ??
-    (user.user_metadata as { role?: string } | undefined)?.role ??
-    null;
-  const isAdmin =
-    profile.role === "vynt_admin" || metadataRole === "vynt_admin";
-
   if (!isAdmin && audit.organization_id !== profile.organization_id) {
     redirect("/dashboard");
   }
 
-  const { data: organization } = await dataClient
+  if (!isAdmin && audit.status !== "published") {
+    redirect("/dashboard");
+  }
+
+  const { data: organization } = await supabase
     .from("organizations")
     .select("id, name")
     .eq("id", audit.organization_id)
-    .single<Organization>();
+    .maybeSingle<Organization>();
 
-  const { data: anomaliesData } = await dataClient
+  const { data: anomaliesData } = await supabase
     .from("anomalies")
     .select(
       "id, audit_id, category, customer_id, status, confidence, annual_impact, monthly_impact, description, root_cause, recommendation, metadata, detected_at"
@@ -106,33 +104,17 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
     ).length,
   };
 
-  const publishAudit = async () => {
-    "use server";
-    const serverSupabase = await createClient();
-    await serverSupabase
-      .from("audits")
-      .update({
-        status: "published",
-        published_at: new Date().toISOString(),
-      })
-      .eq("id", audit.id);
-    redirect(`/audit/${audit.id}`);
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <Button asChild variant="outline">
-          <Link href="/dashboard">Back to dashboard</Link>
+          <Link href={isAdmin ? "/admin" : "/dashboard"}>
+            {isAdmin ? "Back to admin" : "Back to dashboard"}
+          </Link>
         </Button>
 
         <div className="flex flex-wrap items-center gap-3">
           <ExportPdfButton />
-          {isAdmin && audit.status !== "published" && (
-            <form action={publishAudit}>
-              <Button type="submit">Publish Audit</Button>
-            </form>
-          )}
         </div>
       </div>
 
@@ -140,9 +122,9 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
         <Card className="border-amber-200 bg-amber-50">
           <CardContent className="flex items-center gap-3 py-4 text-sm text-amber-700">
             <Badge variant="outline" className="border-amber-200 text-amber-700">
-              Pending
+              {audit.status}
             </Badge>
-            This audit is pending review.
+            This is a preview of what the client will see once published.
           </CardContent>
         </Card>
       )}
