@@ -6,24 +6,20 @@ import { createClient } from "@/lib/supabase/server";
 export const GET = async (request: Request) => {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
-  const redirectTo = searchParams.get("redirectTo");
 
   if (!code) {
-    return NextResponse.redirect(
-      new URL("/login?error=auth", request.url)
-    );
+    return NextResponse.redirect(new URL("/login?error=auth", request.url));
   }
 
   const supabase = await createClient();
   const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
-    return NextResponse.redirect(
-      new URL("/login?error=auth", request.url)
-    );
+    return NextResponse.redirect(new URL("/login?error=auth", request.url));
   }
 
   const user = data.user;
+  let userRole = "member";
 
   if (user) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
@@ -36,9 +32,13 @@ export const GET = async (request: Request) => {
 
       const { data: existingProfile } = await adminSupabase
         .from("profiles")
-        .select("id, organization_id")
+        .select("id, organization_id, role")
         .eq("id", user.id)
         .maybeSingle();
+
+      if (existingProfile?.role) {
+        userRole = existingProfile.role;
+      }
 
       if (!existingProfile?.organization_id) {
         const companyName =
@@ -60,17 +60,15 @@ export const GET = async (request: Request) => {
             full_name:
               (user.user_metadata as { full_name?: string } | undefined)?.full_name ?? null,
             organization_id: organization.id,
-            role: "member",
+            role: existingProfile?.role ?? "member",
           });
         }
       }
     }
   }
 
-  const safeRedirect =
-    redirectTo && redirectTo.startsWith("/") && !redirectTo.startsWith("//")
-      ? redirectTo
-      : "/dashboard";
+  // Redirect based on role
+  const redirectUrl = userRole === "vynt_admin" ? "/admin" : "/dashboard";
 
-  return NextResponse.redirect(new URL(safeRedirect, request.url));
+  return NextResponse.redirect(new URL(redirectUrl, request.url));
 };

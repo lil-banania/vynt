@@ -6,7 +6,6 @@ import {
   Upload,
   Settings,
   LogOut,
-  Shield,
 } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
@@ -35,8 +34,6 @@ const DashboardLayout = async ({ children }: DashboardLayoutProps) => {
   const userLabel =
     user.user_metadata?.full_name || user.email || "User";
 
-  const isAdmin = profile?.role === "vynt_admin";
-
   const signOut = async () => {
     "use server";
     const serverSupabase = await createClient();
@@ -56,24 +53,15 @@ const DashboardLayout = async ({ children }: DashboardLayoutProps) => {
             className="flex items-center gap-3 rounded-md px-3 py-2 text-slate-700 transition hover:bg-slate-100"
           >
             <LayoutGrid className="h-4 w-4" />
-            Dashboard
+            My Audits
           </Link>
           <Link
             href="/upload"
             className="flex items-center gap-3 rounded-md px-3 py-2 text-slate-700 transition hover:bg-slate-100"
           >
             <Upload className="h-4 w-4" />
-            Upload
+            New Audit
           </Link>
-          {isAdmin && (
-            <Link
-              href="/admin"
-              className="flex items-center gap-3 rounded-md px-3 py-2 text-slate-700 transition hover:bg-slate-100"
-            >
-              <Shield className="h-4 w-4" />
-              Admin
-            </Link>
-          )}
           <Link
             href="/settings"
             className="flex items-center gap-3 rounded-md px-3 py-2 text-slate-700 transition hover:bg-slate-100"
@@ -88,11 +76,6 @@ const DashboardLayout = async ({ children }: DashboardLayoutProps) => {
         <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
           <div className="text-sm text-slate-600">
             {userLabel}
-            {isAdmin && (
-              <span className="ml-2 rounded bg-slate-900 px-2 py-0.5 text-xs text-white">
-                Admin
-              </span>
-            )}
           </div>
           <form action={signOut}>
             <Button

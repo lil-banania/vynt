@@ -15,13 +15,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { createClient } from "@/lib/supabase/client";
 
 type UploadStep = "usage" | "stripe" | "review";
 
+type AnalysisResult = {
+  anomaliesDetected: number;
+  annualRevenueAtRisk: number;
+  aiInsights: string | null;
+} | null;
+
 const UploadPage = () => {
   const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
   const [auditId, setAuditId] = useState<string | null>(null);
   const [isCreatingAudit, setIsCreatingAudit] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -29,6 +33,7 @@ const UploadPage = () => {
   const [stripeUploaded, setStripeUploaded] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult>(null);
 
   const createAuditInFlight = useRef<Promise<string> | null>(null);
 
@@ -85,19 +90,33 @@ const UploadPage = () => {
     setIsSubmitting(true);
     setErrorMessage(null);
 
-    const { error } = await supabase
-      .from("audits")
-      .update({ status: "processing" })
-      .eq("id", auditId);
+    try {
+      // Run the automated analysis
+      const response = await fetch("/api/audits/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auditId }),
+      });
 
-    if (error) {
-      setErrorMessage("Unable to start analysis.");
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(data?.error ?? "Analysis failed.");
+      }
+
+      setAnalysisResult({
+        anomaliesDetected: data.anomaliesDetected ?? 0,
+        annualRevenueAtRisk: data.annualRevenueAtRisk ?? 0,
+        aiInsights: data.aiInsights ?? null,
+      });
+      setIsSubmitted(true);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Unable to start analysis."
+      );
+    } finally {
       setIsSubmitting(false);
-      return;
     }
-
-    setIsSubmitted(true);
-    setIsSubmitting(false);
   };
 
   const currentStep: UploadStep = usageUploaded
@@ -118,6 +137,14 @@ const UploadPage = () => {
       return "secondary";
     }
     return "outline";
+  };
+
+  const formatCurrency = (value: number) => {
+    return value.toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 0,
+    });
   };
 
   return (
@@ -166,7 +193,7 @@ const UploadPage = () => {
             <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-sm text-slate-600">
                 {usageUploaded && stripeUploaded
-                  ? "Both files are ready."
+                  ? "Both files are ready. Click to run automated analysis."
                   : "Please upload both files to continue."}
               </div>
               <Button
@@ -181,7 +208,7 @@ const UploadPage = () => {
                   isSubmitted
                 }
               >
-                {isSubmitting ? "Starting..." : "Start Analysis"}
+                {isSubmitting ? "Analyzing..." : "Start Analysis"}
               </Button>
             </CardContent>
           </Card>
@@ -232,9 +259,38 @@ const UploadPage = () => {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Analysis started</DialogTitle>
-            <DialogDescription>
-              We will get back to you within 3 days with the results.
+            <DialogTitle>Analysis Complete</DialogTitle>
+            <DialogDescription className="space-y-3 pt-2">
+              <p>
+                Your revenue audit has been analyzed automatically.
+              </p>
+              {analysisResult && (
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-slate-900">
+                    <div className="grid gap-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-slate-600">Anomalies detected:</span>
+                        <span className="font-semibold">{analysisResult.anomaliesDetected}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-600">Annual revenue at risk:</span>
+                        <span className="font-semibold text-rose-600">
+                          {formatCurrency(analysisResult.annualRevenueAtRisk)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  {analysisResult.aiInsights && (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                      <div className="mb-1 font-semibold">AI Analysis</div>
+                      <p className="whitespace-pre-wrap">{analysisResult.aiInsights}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              <p className="text-slate-500">
+                Our team will review the findings and publish the full report within 3 business days.
+              </p>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

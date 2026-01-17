@@ -33,7 +33,18 @@ const LoginPage = () => {
       } = await supabase.auth.getUser();
 
       if (user && isMounted) {
-        router.replace("/upload");
+        // Check if user is admin
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (profile?.role === "vynt_admin") {
+          router.replace("/admin");
+        } else {
+          router.replace("/dashboard");
+        }
       }
     };
 
@@ -51,7 +62,7 @@ const LoginPage = () => {
     setIsSubmitting(true);
     setErrorMessage(null);
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -62,14 +73,28 @@ const LoginPage = () => {
       return;
     }
 
-    router.replace("/upload");
+    // Check if user is admin
+    if (data.user) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", data.user.id)
+        .maybeSingle();
+
+      if (profile?.role === "vynt_admin") {
+        router.replace("/admin");
+        return;
+      }
+    }
+
+    router.replace("/dashboard");
   };
 
   const handleGoogleSignIn = async () => {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/api/auth/callback?redirectTo=/upload`,
+        redirectTo: `${window.location.origin}/api/auth/callback`,
       },
     });
   };

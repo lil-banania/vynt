@@ -6,7 +6,6 @@ import AnomalyTable from "@/components/dashboard/AnomalyTable";
 import CategoryBreakdown from "@/components/dashboard/CategoryBreakdown";
 import ExportPdfButton from "@/components/dashboard/ExportPdfButton";
 import ImpactChart from "@/components/dashboard/ImpactChart";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -51,7 +50,10 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
     redirect("/login");
   }
 
-  const isAdmin = profile.role === "vynt_admin";
+  // Admins should use the admin preview instead
+  if (profile.role === "vynt_admin") {
+    redirect(`/admin/preview/${id}`);
+  }
 
   const { data: audit } = await supabase
     .from("audits")
@@ -65,11 +67,13 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
     notFound();
   }
 
-  if (!isAdmin && audit.organization_id !== profile.organization_id) {
+  // Only allow access to own organization's audits
+  if (audit.organization_id !== profile.organization_id) {
     redirect("/dashboard");
   }
 
-  if (!isAdmin && audit.status !== "published") {
+  // Only show published audits to clients
+  if (audit.status !== "published") {
     redirect("/dashboard");
   }
 
@@ -108,26 +112,13 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <Button asChild variant="outline">
-          <Link href={isAdmin ? "/admin" : "/dashboard"}>
-            {isAdmin ? "Back to admin" : "Back to dashboard"}
-          </Link>
+          <Link href="/dashboard">Back to My Audits</Link>
         </Button>
 
         <div className="flex flex-wrap items-center gap-3">
           <ExportPdfButton />
         </div>
       </div>
-
-      {isAdmin && audit.status !== "published" && (
-        <Card className="border-amber-200 bg-amber-50">
-          <CardContent className="flex items-center gap-3 py-4 text-sm text-amber-700">
-            <Badge variant="outline" className="border-amber-200 text-amber-700">
-              {audit.status}
-            </Badge>
-            This is a preview of what the client will see once published.
-          </CardContent>
-        </Card>
-      )}
 
       <AuditSummary
         audit={{

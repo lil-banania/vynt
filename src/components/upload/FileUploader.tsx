@@ -20,21 +20,22 @@ type FileUploaderProps = {
   onUploadComplete: (fileId: string, rowCount: number) => void;
 };
 
-const REQUIRED_COLUMNS: Record<FileType, string[]> = {
-  usage_logs: [
-    "event_id",
-    "customer_id",
-    "event_type",
-    "timestamp",
-    "quantity",
-  ],
-  stripe_export: [
-    "id",
-    "customer",
-    "amount",
-    "status",
-    "created",
-  ],
+// Column mapping suggestions for auto-detection
+const COLUMN_HINTS: Record<FileType, Record<string, string[]>> = {
+  usage_logs: {
+    customer_id: ["customer_id", "customer", "cust_id", "user_id", "account_id", "client_id"],
+    timestamp: ["timestamp", "date", "created_at", "event_date", "time", "created"],
+    quantity: ["quantity", "amount", "count", "units", "value", "usage"],
+    event_type: ["event_type", "type", "event", "action", "category"],
+    event_id: ["event_id", "id", "uuid", "transaction_id"],
+  },
+  stripe_export: {
+    customer: ["customer", "customer_id", "cust_id", "stripe_customer_id", "client_id"],
+    amount: ["amount", "total", "charge_amount", "price", "value", "sum"],
+    status: ["status", "state", "payment_status", "charge_status"],
+    created: ["created", "date", "timestamp", "created_at", "payment_date"],
+    id: ["id", "charge_id", "payment_id", "transaction_id", "stripe_id"],
+  },
 };
 
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
@@ -114,15 +115,18 @@ const FileUploader = ({
       try {
         const results = await parseCsv(file);
         const headers = results.meta.fields ?? [];
-        const requiredColumns = REQUIRED_COLUMNS[fileType];
-        const missingColumns = requiredColumns.filter(
-          (column) => !headers.includes(column)
-        );
 
-        if (missingColumns.length > 0) {
-          throw new Error(
-            `Missing columns: ${missingColumns.join(", ")}.`
+        // Auto-detect column mappings
+        const hints = COLUMN_HINTS[fileType];
+        const detectedMappings: Record<string, string> = {};
+        
+        for (const [targetCol, possibleNames] of Object.entries(hints)) {
+          const found = headers.find((h) =>
+            possibleNames.some((name) => h.toLowerCase().includes(name.toLowerCase()))
           );
+          if (found) {
+            detectedMappings[targetCol] = found;
+          }
         }
 
         const rows = results.data.filter((row) =>
