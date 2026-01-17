@@ -1,21 +1,13 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { AlertTriangle, Clock, DollarSign, Shield, TrendingDown, Users, FileText, Zap, Target, ArrowLeft } from "lucide-react";
 
 import AuditSummary from "@/components/dashboard/AuditSummary";
 import AnomalyTable from "@/components/dashboard/AnomalyTable";
-import CategoryBreakdown from "@/components/dashboard/CategoryBreakdown";
 import ExportPdfButton from "@/components/dashboard/ExportPdfButton";
-import ImpactChart from "@/components/dashboard/ImpactChart";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
 import { createClient } from "@/lib/supabase/server";
-import { Anomaly, Audit, Profile } from "@/lib/types/database";
+import { Anomaly, Audit, Profile, AnomalyCategory, AnomalyConfidence } from "@/lib/types/database";
 
 type AuditDetailPageProps = {
   params: Promise<{
@@ -26,6 +18,35 @@ type AuditDetailPageProps = {
 type Organization = {
   id: string;
   name: string;
+};
+
+const formatCurrency = (value: number | null) => {
+  if (value === null) return "$0";
+  return value.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
+};
+
+const categoryConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
+  zombie_subscription: { label: "Zombie Subscription", color: "bg-rose-500", icon: Users },
+  unbilled_usage: { label: "Unbilled Usage", color: "bg-amber-500", icon: FileText },
+  pricing_mismatch: { label: "Pricing Mismatch", color: "bg-purple-500", icon: DollarSign },
+  duplicate_charge: { label: "Duplicate Charge", color: "bg-orange-500", icon: AlertTriangle },
+  failed_payment: { label: "Failed Payment", color: "bg-red-500", icon: TrendingDown },
+  high_refund_rate: { label: "High Refund Rate", color: "bg-pink-500", icon: TrendingDown },
+  dispute_chargeback: { label: "Dispute/Chargeback", color: "bg-red-600", icon: Shield },
+  trial_abuse: { label: "Trial Abuse", color: "bg-yellow-500", icon: Zap },
+  revenue_leakage: { label: "Revenue Leakage", color: "bg-cyan-500", icon: TrendingDown },
+  involuntary_churn: { label: "Involuntary Churn", color: "bg-slate-500", icon: Clock },
+  other: { label: "Other", color: "bg-slate-400", icon: AlertTriangle },
+};
+
+const confidenceConfig: Record<AnomalyConfidence, { label: string; color: string }> = {
+  high: { label: "HIGH", color: "bg-emerald-600 text-white" },
+  medium: { label: "MEDIUM", color: "bg-amber-500 text-white" },
+  low: { label: "LOW", color: "bg-slate-500 text-white" },
 };
 
 const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
@@ -89,104 +110,279 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
       "id, audit_id, category, customer_id, status, confidence, annual_impact, monthly_impact, description, root_cause, recommendation, metadata, detected_at"
     )
     .eq("audit_id", audit.id)
+    .order("annual_impact", { ascending: false })
     .returns<Anomaly[]>();
 
   const anomalies = anomaliesData ?? [];
 
-  const anomalyCounts = {
-    zombie_subscription: anomalies.filter(
-      (item) => item.category === "zombie_subscription"
-    ).length,
-    unbilled_usage: anomalies.filter(
-      (item) => item.category === "unbilled_usage"
-    ).length,
-    pricing_mismatch: anomalies.filter(
-      (item) => item.category === "pricing_mismatch"
-    ).length,
-    duplicate_charge: anomalies.filter(
-      (item) => item.category === "duplicate_charge"
-    ).length,
-  };
+  // Calculate category breakdown with impact
+  const categoryBreakdown = anomalies.reduce((acc, anomaly) => {
+    const category = anomaly.category as AnomalyCategory;
+    if (!acc[category]) {
+      acc[category] = { count: 0, impact: 0 };
+    }
+    acc[category].count += 1;
+    acc[category].impact += anomaly.annual_impact ?? 0;
+    return acc;
+  }, {} as Record<string, { count: number; impact: number }>);
+
+  // Get top 5 issues by impact
+  const topIssues = anomalies.slice(0, 5);
+
+  // Identify common patterns
+  const patterns: { title: string; description: string; percentage: number }[] = [];
+  
+  const zombieCount = anomalies.filter(a => a.category === "zombie_subscription").length;
+  const failedCount = anomalies.filter(a => a.category === "failed_payment" || a.category === "involuntary_churn").length;
+  const unbilledCount = anomalies.filter(a => a.category === "unbilled_usage" || a.category === "revenue_leakage").length;
+  
+  if (zombieCount > 0 && anomalies.length > 0) {
+    patterns.push({
+      title: "Inactive Subscription Risk",
+      description: "Active subscriptions with zero product activity. Review webhook reliability and churn detection.",
+      percentage: Math.round((zombieCount / anomalies.length) * 100),
+    });
+  }
+  
+  if (failedCount > 0 && anomalies.length > 0) {
+    patterns.push({
+      title: "Payment Recovery Opportunity",
+      description: "Failed payments and churn risk. Implement dunning sequences and smart retries.",
+      percentage: Math.round((failedCount / anomalies.length) * 100),
+    });
+  }
+  
+  if (unbilledCount > 0 && anomalies.length > 0) {
+    patterns.push({
+      title: "Billing Gap Issues",
+      description: "Usage events not properly invoiced. Review metering pipeline and invoice generation.",
+      percentage: Math.round((unbilledCount / anomalies.length) * 100),
+    });
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8 print:space-y-6">
+      {/* Header Actions */}
       <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
-        <Button asChild variant="outline">
-          <Link href="/dashboard">Back to My Audits</Link>
+        <Button asChild variant="outline" className="border-slate-300">
+          <Link href="/dashboard">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to My Audits
+          </Link>
         </Button>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <ExportPdfButton />
-        </div>
+        <ExportPdfButton />
       </div>
 
+      {/* Audit Summary (Header + Executive Summary + Breakdown) */}
       <AuditSummary
         audit={{
           ...audit,
           organization_name: organization?.name,
         }}
-        anomalyCounts={anomalyCounts}
+        categoryBreakdown={categoryBreakdown}
       />
 
-      <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="anomalies">Anomalies</TabsTrigger>
-          <TabsTrigger value="recommendations">Recommendations</TabsTrigger>
-        </TabsList>
+      {/* Top Issues Section */}
+      {topIssues.length > 0 && (
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
+            <Target className="h-5 w-5 text-slate-600" />
+            Top {topIssues.length} Issues (by Financial Impact)
+          </h2>
+          
+          <div className="space-y-4">
+            {topIssues.map((anomaly, index) => {
+              const catConfig = categoryConfig[anomaly.category] ?? categoryConfig.other;
+              const confConfig = confidenceConfig[anomaly.confidence];
+              const Icon = catConfig.icon;
+              
+              return (
+                <div key={anomaly.id} className="rounded-xl border border-slate-200 bg-white overflow-hidden print:break-inside-avoid">
+                  {/* Issue Header */}
+                  <div className="flex items-center justify-between px-6 py-4 bg-slate-50 border-b border-slate-200">
+                    <div className="flex items-center gap-4">
+                      <span className="flex items-center justify-center w-8 h-8 rounded-full bg-slate-900 text-white text-sm font-bold">
+                        {index + 1}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <div className={`rounded-lg p-1.5 ${catConfig.color}`}>
+                          <Icon className="h-4 w-4 text-white" />
+                        </div>
+                        <span className="font-semibold text-slate-900">{catConfig.label}</span>
+                      </div>
+                      {anomaly.customer_id && (
+                        <span className="text-sm text-slate-500">— Customer #{anomaly.customer_id}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${confConfig.color}`}>
+                        {confConfig.label}
+                      </span>
+                      <span className="text-lg font-bold text-rose-600">
+                        {formatCurrency(anomaly.annual_impact)}/yr
+                      </span>
+                    </div>
+                  </div>
+                  
+                  {/* Issue Body */}
+                  <div className="px-6 py-5 space-y-4">
+                    <div>
+                      <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Status</h4>
+                      <p className="text-slate-700">{anomaly.description}</p>
+                    </div>
+                    
+                    {anomaly.monthly_impact && (
+                      <div className="flex gap-8">
+                        <div>
+                          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Monthly Impact</h4>
+                          <p className="text-slate-900 font-semibold">{formatCurrency(anomaly.monthly_impact)}/mo</p>
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Annual Impact</h4>
+                          <p className="text-rose-600 font-semibold">{formatCurrency(anomaly.annual_impact)}</p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {anomaly.root_cause && (
+                      <div>
+                        <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Root Cause</h4>
+                        <p className="text-slate-700">{anomaly.root_cause}</p>
+                      </div>
+                    )}
+                    
+                    {anomaly.recommendation && (
+                      <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4">
+                        <h4 className="text-xs font-semibold uppercase tracking-wider text-emerald-700 mb-1">Recommendation</h4>
+                        <p className="text-emerald-800">{anomaly.recommendation}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          
+          {anomalies.length > 5 && (
+            <p className="text-center text-sm text-slate-500 mt-4">
+              + {anomalies.length - 5} additional anomalies detected (see full list below)
+            </p>
+          )}
+        </section>
+      )}
 
-        <TabsContent value="overview" className="space-y-6">
-          <ImpactChart anomalies={anomalies} />
-          <CategoryBreakdown anomalyCounts={anomalyCounts} />
-        </TabsContent>
+      {/* Common Patterns */}
+      {patterns.length > 0 && (
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-4">Common Patterns Identified</h2>
+          
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {patterns.map((pattern, index) => (
+              <div key={index} className="rounded-xl border border-slate-200 bg-white p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-slate-900">{pattern.title}</h3>
+                  <span className="text-sm font-bold text-slate-600">{pattern.percentage}%</span>
+                </div>
+                <div className="w-full bg-slate-100 rounded-full h-2 mb-3">
+                  <div 
+                    className="bg-slate-900 h-2 rounded-full" 
+                    style={{ width: `${pattern.percentage}%` }}
+                  />
+                </div>
+                <p className="text-sm text-slate-600">{pattern.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
-        <TabsContent value="anomalies">
+      {/* Full Anomaly List */}
+      {anomalies.length > 0 && (
+        <section className="print:hidden">
+          <h2 className="text-xl font-bold text-slate-900 mb-4">All Detected Anomalies</h2>
           <AnomalyTable anomalies={anomalies} />
-        </TabsContent>
+        </section>
+      )}
 
-        <TabsContent value="recommendations">
-          <Card className="border-slate-200">
-            <CardContent className="space-y-4 py-6 text-sm text-slate-600">
-              <div>
-                <div className="font-semibold text-slate-900">
-                  Subscription hygiene
-                </div>
-                <p>
-                  Review inactive customers with ongoing renewals to reduce
-                  zombie subscriptions.
-                </p>
-              </div>
-              <div>
-                <div className="font-semibold text-slate-900">
-                  Usage billing gaps
-                </div>
-                <p>
-                  Align usage events with Stripe invoices to recover unbilled
-                  revenue faster.
-                </p>
-              </div>
-              <div>
-                <div className="font-semibold text-slate-900">
-                  Pricing consistency
-                </div>
-                <p>
-                  Standardize pricing tiers and discount rules to reduce
-                  mismatches.
-                </p>
-              </div>
-              <div>
-                <div className="font-semibold text-slate-900">
-                  Duplicate charge prevention
-                </div>
-                <p>
-                  Automate duplicate charge detection before invoice
-                  finalization.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      {/* Recommended Next Steps */}
+      <section className="print:break-inside-avoid">
+        <h2 className="text-xl font-bold text-slate-900 mb-4">Recommended Next Steps</h2>
+        
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="rounded-xl border-2 border-rose-200 bg-rose-50 p-5">
+            <h3 className="font-bold text-rose-800 mb-2">Immediate (This Week)</h3>
+            <ul className="space-y-2 text-sm text-rose-700">
+              <li>• Review top 5 anomalies with finance</li>
+              <li>• Begin recovery for high-confidence issues</li>
+              <li>• Contact at-risk customers</li>
+            </ul>
+          </div>
+          
+          <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-5">
+            <h3 className="font-bold text-amber-800 mb-2">Short-Term (This Month)</h3>
+            <ul className="space-y-2 text-sm text-amber-700">
+              <li>• Implement real-time monitoring</li>
+              <li>• Fix billing sync issues</li>
+              <li>• Review dunning sequences</li>
+            </ul>
+          </div>
+          
+          <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-5">
+            <h3 className="font-bold text-emerald-800 mb-2">Long-Term (Next Quarter)</h3>
+            <ul className="space-y-2 text-sm text-emerald-700">
+              <li>• Event-driven billing architecture</li>
+              <li>• Automated reconciliation</li>
+              <li>• Continuous revenue monitoring</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* Methodology */}
+      <section className="print:break-inside-avoid">
+        <h2 className="text-xl font-bold text-slate-900 mb-4">Methodology</h2>
+        
+        <div className="grid gap-6 md:grid-cols-2">
+          <div className="rounded-xl border border-slate-200 bg-white p-5">
+            <h3 className="font-semibold text-slate-900 mb-3">Data Sources Analyzed</h3>
+            <ul className="space-y-2 text-sm text-slate-600">
+              <li className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Stripe Payment Records
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Product Usage Logs
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Customer Account Status
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Invoice and Billing History
+              </li>
+            </ul>
+          </div>
+          
+          <div className="rounded-xl border border-slate-200 bg-white p-5">
+            <h3 className="font-semibold text-slate-900 mb-3">Analysis Process</h3>
+            <ol className="space-y-2 text-sm text-slate-600 list-decimal list-inside">
+              <li>Cross-reference customer IDs between billing and product data</li>
+              <li>Identify discrepancies (active billing with no usage, usage with no billing)</li>
+              <li>Detect payment failures and churn risk patterns</li>
+              <li>Confidence scoring based on data quality</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <div className="pt-8 border-t border-slate-200 text-center text-sm text-slate-500">
+        <p>This audit was performed by <strong className="text-slate-900">Vynt</strong></p>
+        <p className="text-slate-400">Revenue Observability for Modern SaaS</p>
+      </div>
     </div>
   );
 };

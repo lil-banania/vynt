@@ -225,7 +225,7 @@ export async function POST(request: Request) {
     if (failedCharges.length > 0) {
       anomalies.push({
         audit_id: auditId,
-        category: "pricing_mismatch",
+        category: "failed_payment",
         customer_id: customerId,
         status: "detected",
         confidence: "high",
@@ -243,7 +243,7 @@ export async function POST(request: Request) {
     if (totalRefunded > 0 && totalRefunded > totalCharged * 0.1) {
       anomalies.push({
         audit_id: auditId,
-        category: "pricing_mismatch",
+        category: "high_refund_rate",
         customer_id: customerId,
         status: "detected",
         confidence: totalRefunded > totalCharged * 0.25 ? "high" : "medium",
@@ -261,7 +261,7 @@ export async function POST(request: Request) {
     if (disputedCharges.length > 0) {
       anomalies.push({
         audit_id: auditId,
-        category: "duplicate_charge",
+        category: "dispute_chargeback",
         customer_id: customerId,
         status: "detected",
         confidence: "high",
@@ -317,7 +317,7 @@ export async function POST(request: Request) {
     if (succeededCharges.length >= 3 && totalCharged < 10) {
       anomalies.push({
         audit_id: auditId,
-        category: "other",
+        category: "trial_abuse",
         customer_id: customerId,
         status: "detected",
         confidence: "medium",
@@ -340,7 +340,7 @@ export async function POST(request: Request) {
         if (leakage > 10) {
           anomalies.push({
             audit_id: auditId,
-            category: "unbilled_usage",
+            category: "revenue_leakage",
             customer_id: customerId,
             status: "detected",
             confidence: leakage > 100 ? "high" : "medium",
@@ -363,7 +363,7 @@ export async function POST(request: Request) {
       if (latestFailure > latestSuccess) {
         anomalies.push({
           audit_id: auditId,
-          category: "other",
+          category: "involuntary_churn",
           customer_id: customerId,
           status: "detected",
           confidence: "high",

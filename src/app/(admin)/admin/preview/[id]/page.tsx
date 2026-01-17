@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Check, Loader2 } from "lucide-react";
+import { ArrowLeft, AlertTriangle, TrendingDown, Users, DollarSign, Shield, Clock, FileText, Target, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/server";
-import { Anomaly, Audit } from "@/lib/types/database";
+import { Anomaly, Audit, AnomalyCategory, AnomalyConfidence } from "@/lib/types/database";
+import PublishButton from "@/components/admin/PublishButton";
 
 type PreviewPageProps = {
   params: Promise<{
@@ -30,19 +31,30 @@ const formatDateRange = (start: string | null, end: string | null) => {
   if (!start || !end) return "Period not set";
   const format = (value: string) =>
     new Date(value).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
+      month: "long",
       year: "numeric",
     });
   return `${format(start)} - ${format(end)}`;
 };
 
-const categoryLabels: Record<string, string> = {
-  zombie_subscription: "Zombie Subscription",
-  unbilled_usage: "Unbilled Usage",
-  pricing_mismatch: "Pricing Issue",
-  duplicate_charge: "Duplicate/Dispute",
-  other: "Other",
+const categoryConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
+  zombie_subscription: { label: "Zombie Subscription", color: "bg-rose-500", icon: Users },
+  unbilled_usage: { label: "Unbilled Usage", color: "bg-amber-500", icon: FileText },
+  pricing_mismatch: { label: "Pricing Mismatch", color: "bg-purple-500", icon: DollarSign },
+  duplicate_charge: { label: "Duplicate Charge", color: "bg-orange-500", icon: AlertTriangle },
+  failed_payment: { label: "Failed Payment", color: "bg-red-500", icon: TrendingDown },
+  high_refund_rate: { label: "High Refund Rate", color: "bg-pink-500", icon: TrendingDown },
+  dispute_chargeback: { label: "Dispute / Chargeback", color: "bg-red-600", icon: Shield },
+  trial_abuse: { label: "Trial Abuse", color: "bg-yellow-500", icon: Zap },
+  revenue_leakage: { label: "Revenue Leakage", color: "bg-cyan-500", icon: TrendingDown },
+  involuntary_churn: { label: "Involuntary Churn Risk", color: "bg-slate-500", icon: Clock },
+  other: { label: "Other", color: "bg-slate-400", icon: AlertTriangle },
+};
+
+const confidenceConfig: Record<AnomalyConfidence, { label: string; color: string }> = {
+  high: { label: "HIGH", color: "bg-emerald-600 text-white" },
+  medium: { label: "MEDIUM", color: "bg-amber-500 text-white" },
+  low: { label: "LOW", color: "bg-slate-500 text-white" },
 };
 
 const PreviewPage = async ({ params }: PreviewPageProps) => {
@@ -71,7 +83,7 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
   const { data: anomaliesData } = await supabase
     .from("anomalies")
     .select(
-      "id, category, customer_id, status, confidence, annual_impact, monthly_impact, description, root_cause, recommendation"
+      "id, category, customer_id, status, confidence, annual_impact, monthly_impact, description, root_cause, recommendation, metadata"
     )
     .eq("audit_id", audit.id)
     .order("annual_impact", { ascending: false })
@@ -79,13 +91,52 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
 
   const anomalies = anomaliesData ?? [];
 
-  const anomalyCounts = {
-    zombie_subscription: anomalies.filter((a) => a.category === "zombie_subscription").length,
-    unbilled_usage: anomalies.filter((a) => a.category === "unbilled_usage").length,
-    pricing_mismatch: anomalies.filter((a) => a.category === "pricing_mismatch").length,
-    duplicate_charge: anomalies.filter((a) => a.category === "duplicate_charge").length,
-    other: anomalies.filter((a) => a.category === "other").length,
-  };
+  // Calculate category breakdown with impact
+  const categoryBreakdown = anomalies.reduce((acc, anomaly) => {
+    const category = anomaly.category as AnomalyCategory;
+    if (!acc[category]) {
+      acc[category] = { count: 0, impact: 0 };
+    }
+    acc[category].count += 1;
+    acc[category].impact += anomaly.annual_impact ?? 0;
+    return acc;
+  }, {} as Record<string, { count: number; impact: number }>);
+
+  // Get top 5 issues by impact
+  const topIssues = anomalies.slice(0, 5);
+
+  // Identify common patterns
+  const patterns: { title: string; description: string; percentage: number }[] = [];
+  
+  const zombieCount = anomalies.filter(a => a.category === "zombie_subscription").length;
+  const failedCount = anomalies.filter(a => a.category === "failed_payment" || a.category === "involuntary_churn").length;
+  const unbilledCount = anomalies.filter(a => a.category === "unbilled_usage" || a.category === "revenue_leakage").length;
+  
+  if (zombieCount > 0) {
+    patterns.push({
+      title: "Inactive Subscription Risk",
+      description: "Active subscriptions with zero product activity detected. Review webhook reliability and churn detection.",
+      percentage: Math.round((zombieCount / anomalies.length) * 100) || 0,
+    });
+  }
+  
+  if (failedCount > 0) {
+    patterns.push({
+      title: "Payment Recovery Opportunity",
+      description: "Failed payments and churn risk from payment issues. Implement dunning sequences and smart retries.",
+      percentage: Math.round((failedCount / anomalies.length) * 100) || 0,
+    });
+  }
+  
+  if (unbilledCount > 0) {
+    patterns.push({
+      title: "Billing Gap Issues",
+      description: "Usage events not properly invoiced. Review metering pipeline and invoice generation logic.",
+      percentage: Math.round((unbilledCount / anomalies.length) * 100) || 0,
+    });
+  }
+
+  const estimatedRecovery = (audit.annual_revenue_at_risk ?? 0) * 0.85;
 
   return (
     <div className="space-y-6">
@@ -102,124 +153,326 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
           </Link>
         </Button>
 
-        <div className="flex items-center gap-3">
-          {audit.status !== "published" && (
-            <form action={`/api/audits/status`} method="POST">
-              <input type="hidden" name="auditId" value={audit.id} />
-              <input type="hidden" name="status" value="published" />
-              <Button className="bg-emerald-600 hover:bg-emerald-700">
-                <Check className="mr-2 h-4 w-4" />
-                Publish Audit
-              </Button>
-            </form>
-          )}
-        </div>
+        <PublishButton auditId={audit.id} status={audit.status} />
       </div>
 
       {/* Preview Banner */}
       <div className="rounded-lg border border-amber-600/50 bg-amber-950/50 px-4 py-3 text-sm text-amber-400">
-        <strong>Preview Mode:</strong> This is how the client will see their audit once published.
+        <strong>Preview Mode:</strong> This is how the client will see their audit report once published.
       </div>
 
       {/* Client View Preview */}
-      <div className="rounded-lg border border-slate-700 bg-slate-50 p-6 text-slate-900">
-        {/* Organization Header */}
-        <div className="mb-6 border-b border-slate-200 pb-6">
-          <h1 className="text-2xl font-bold text-slate-900">
-            {organization?.name ?? "Organization"}
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {formatDateRange(audit.audit_period_start, audit.audit_period_end)}
-          </p>
-        </div>
-
-        {/* Summary Cards */}
-        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="text-sm font-medium text-slate-500">Total Anomalies</div>
-            <div className="mt-1 text-3xl font-bold text-slate-900">
-              {audit.total_anomalies ?? 0}
-            </div>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="text-sm font-medium text-slate-500">Annual Revenue at Risk</div>
-            <div className="mt-1 text-3xl font-bold text-rose-600">
-              {formatCurrency(audit.annual_revenue_at_risk)}
-            </div>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="text-sm font-medium text-slate-500">Monthly Impact</div>
-            <div className="mt-1 text-3xl font-bold text-slate-900">
-              {formatCurrency((audit.annual_revenue_at_risk ?? 0) / 12)}
-            </div>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="text-sm font-medium text-slate-500">Recovery Potential</div>
-            <div className="mt-1 text-3xl font-bold text-emerald-600">85-90%</div>
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm print:shadow-none">
+        
+        {/* Report Header */}
+        <div className="border-b border-slate-200 bg-gradient-to-r from-slate-900 to-slate-800 px-8 py-10 text-white rounded-t-xl">
+          <div className="max-w-4xl">
+            <p className="text-sm font-medium uppercase tracking-wider text-slate-400 mb-2">Revenue Audit Report</p>
+            <h1 className="text-3xl font-bold mb-2">
+              {organization?.name ?? "Organization"}
+            </h1>
+            <p className="text-slate-400">
+              Audit Period: {formatDateRange(audit.audit_period_start, audit.audit_period_end)}
+            </p>
+            <p className="text-slate-500 text-sm mt-1">
+              Report Generated: {new Date(audit.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+            </p>
           </div>
         </div>
 
-        {/* Breakdown by Category */}
-        <div className="mb-8">
-          <h2 className="mb-4 text-lg font-semibold text-slate-900">Breakdown by Category</h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {Object.entries(anomalyCounts).map(([key, count]) => (
-              <div key={key} className="rounded-lg border border-slate-200 bg-white p-3">
-                <div className="text-xs font-medium uppercase tracking-wider text-slate-500">
-                  {categoryLabels[key] ?? key}
+        <div className="p-8">
+          {/* Executive Summary */}
+          <section className="mb-10">
+            <h2 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-2">
+              <Target className="h-5 w-5 text-slate-600" />
+              Executive Summary
+            </h2>
+            
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+              <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5">
+                <div className="flex items-center gap-2 text-sm font-medium text-slate-500 mb-1">
+                  <AlertTriangle className="h-4 w-4" />
+                  Total Anomalies
                 </div>
-                <div className="mt-1 text-2xl font-bold text-slate-900">{count}</div>
+                <div className="text-4xl font-bold text-slate-900">
+                  {audit.total_anomalies ?? 0}
+                </div>
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Anomalies List */}
-        <div>
-          <h2 className="mb-4 text-lg font-semibold text-slate-900">Detected Anomalies</h2>
-          {anomalies.length === 0 ? (
-            <div className="rounded-lg border border-slate-200 bg-white p-6 text-center text-slate-500">
-              No anomalies detected.
+              
+              <div className="rounded-xl border border-rose-200 bg-gradient-to-br from-rose-50 to-white p-5">
+                <div className="flex items-center gap-2 text-sm font-medium text-rose-600 mb-1">
+                  <DollarSign className="h-4 w-4" />
+                  Annual Revenue at Risk
+                </div>
+                <div className="text-4xl font-bold text-rose-600">
+                  {formatCurrency(audit.annual_revenue_at_risk)}
+                </div>
+              </div>
+              
+              <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5">
+                <div className="flex items-center gap-2 text-sm font-medium text-slate-500 mb-1">
+                  <Clock className="h-4 w-4" />
+                  Avg. Detection Time
+                </div>
+                <div className="text-4xl font-bold text-slate-900">
+                  4-7 <span className="text-lg font-normal text-slate-500">mo</span>
+                </div>
+              </div>
+              
+              <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-5">
+                <div className="flex items-center gap-2 text-sm font-medium text-emerald-600 mb-1">
+                  <TrendingDown className="h-4 w-4 rotate-180" />
+                  Estimated Recovery
+                </div>
+                <div className="text-4xl font-bold text-emerald-600">
+                  {formatCurrency(estimatedRecovery)}
+                </div>
+                <div className="text-xs text-emerald-600 mt-1">85-90% recovery rate</div>
+              </div>
             </div>
-          ) : (
-            <div className="space-y-3">
-              {anomalies.slice(0, 10).map((anomaly) => (
-                <div
-                  key={anomaly.id}
-                  className="rounded-lg border border-slate-200 bg-white p-4"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-                          {categoryLabels[anomaly.category] ?? anomaly.category}
-                        </span>
-                        <span className="rounded bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
-                          {formatCurrency(anomaly.annual_impact)}/year
-                        </span>
-                        {anomaly.customer_id && (
-                          <span className="text-xs text-slate-500">
-                            Customer: {anomaly.customer_id}
+          </section>
+
+          {/* Breakdown by Category */}
+          <section className="mb-10">
+            <h2 className="text-xl font-bold text-slate-900 mb-6">Breakdown by Category</h2>
+            
+            <div className="overflow-hidden rounded-xl border border-slate-200">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">Category</th>
+                    <th className="px-6 py-3 text-center text-xs font-semibold uppercase tracking-wider text-slate-600">Count</th>
+                    <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-600">Annual Impact</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {Object.entries(categoryBreakdown)
+                    .sort((a, b) => b[1].impact - a[1].impact)
+                    .map(([category, data]) => {
+                      const config = categoryConfig[category] ?? categoryConfig.other;
+                      const Icon = config.icon;
+                      return (
+                        <tr key={category} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className={`rounded-lg p-2 ${config.color}`}>
+                                <Icon className="h-4 w-4 text-white" />
+                              </div>
+                              <span className="font-medium text-slate-900">{config.label}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <span className="inline-flex items-center justify-center rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
+                              {data.count}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <span className="font-semibold text-rose-600">{formatCurrency(data.impact)}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-slate-900 text-white">
+                    <td className="px-6 py-4 font-semibold">Total</td>
+                    <td className="px-6 py-4 text-center font-semibold">{anomalies.length}</td>
+                    <td className="px-6 py-4 text-right font-semibold">{formatCurrency(audit.annual_revenue_at_risk)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </section>
+
+          {/* Top Issues */}
+          {topIssues.length > 0 && (
+            <section className="mb-10">
+              <h2 className="text-xl font-bold text-slate-900 mb-6">Top {topIssues.length} Issues (by Financial Impact)</h2>
+              
+              <div className="space-y-4">
+                {topIssues.map((anomaly, index) => {
+                  const catConfig = categoryConfig[anomaly.category] ?? categoryConfig.other;
+                  const confConfig = confidenceConfig[anomaly.confidence];
+                  const Icon = catConfig.icon;
+                  
+                  return (
+                    <div key={anomaly.id} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                      {/* Issue Header */}
+                      <div className="flex items-center justify-between px-6 py-4 bg-slate-50 border-b border-slate-200">
+                        <div className="flex items-center gap-4">
+                          <span className="flex items-center justify-center w-8 h-8 rounded-full bg-slate-900 text-white text-sm font-bold">
+                            {index + 1}
                           </span>
+                          <div className="flex items-center gap-2">
+                            <div className={`rounded-lg p-1.5 ${catConfig.color}`}>
+                              <Icon className="h-4 w-4 text-white" />
+                            </div>
+                            <span className="font-semibold text-slate-900">{catConfig.label}</span>
+                          </div>
+                          {anomaly.customer_id && (
+                            <span className="text-sm text-slate-500">— Customer #{anomaly.customer_id}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${confConfig.color}`}>
+                            {confConfig.label}
+                          </span>
+                          <span className="text-lg font-bold text-rose-600">
+                            {formatCurrency(anomaly.annual_impact)}/yr
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {/* Issue Body */}
+                      <div className="px-6 py-5 space-y-4">
+                        <div>
+                          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Status</h4>
+                          <p className="text-slate-700">{anomaly.description}</p>
+                        </div>
+                        
+                        {anomaly.monthly_impact && (
+                          <div className="flex gap-8">
+                            <div>
+                              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Monthly Impact</h4>
+                              <p className="text-slate-900 font-semibold">{formatCurrency(anomaly.monthly_impact)}/mo</p>
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Annual Impact</h4>
+                              <p className="text-rose-600 font-semibold">{formatCurrency(anomaly.annual_impact)}</p>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {anomaly.root_cause && (
+                          <div>
+                            <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Root Cause</h4>
+                            <p className="text-slate-700">{anomaly.root_cause}</p>
+                          </div>
+                        )}
+                        
+                        {anomaly.recommendation && (
+                          <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4">
+                            <h4 className="text-xs font-semibold uppercase tracking-wider text-emerald-700 mb-1">Recommendation</h4>
+                            <p className="text-emerald-800">{anomaly.recommendation}</p>
+                          </div>
                         )}
                       </div>
-                      <p className="mt-2 text-sm text-slate-700">{anomaly.description}</p>
-                      {anomaly.recommendation && (
-                        <p className="mt-2 text-sm text-emerald-700">
-                          <strong>Recommendation:</strong> {anomaly.recommendation}
-                        </p>
-                      )}
                     </div>
-                  </div>
-                </div>
-              ))}
-              {anomalies.length > 10 && (
-                <div className="text-center text-sm text-slate-500">
-                  And {anomalies.length - 10} more anomalies...
-                </div>
+                  );
+                })}
+              </div>
+              
+              {anomalies.length > 5 && (
+                <p className="text-center text-sm text-slate-500 mt-4">
+                  + {anomalies.length - 5} additional anomalies detected
+                </p>
               )}
-            </div>
+            </section>
           )}
+
+          {/* Common Patterns */}
+          {patterns.length > 0 && (
+            <section className="mb-10">
+              <h2 className="text-xl font-bold text-slate-900 mb-6">Common Patterns Identified</h2>
+              
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {patterns.map((pattern, index) => (
+                  <div key={index} className="rounded-xl border border-slate-200 p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-semibold text-slate-900">{pattern.title}</h3>
+                      <span className="text-sm font-bold text-slate-600">{pattern.percentage}%</span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-2 mb-3">
+                      <div 
+                        className="bg-slate-900 h-2 rounded-full" 
+                        style={{ width: `${pattern.percentage}%` }}
+                      />
+                    </div>
+                    <p className="text-sm text-slate-600">{pattern.description}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Methodology */}
+          <section className="mb-10">
+            <h2 className="text-xl font-bold text-slate-900 mb-6">Methodology</h2>
+            
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 p-5">
+                <h3 className="font-semibold text-slate-900 mb-3">Data Sources Analyzed</h3>
+                <ul className="space-y-2 text-sm text-slate-600">
+                  <li className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    Stripe Payment Records
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    Product Usage Logs
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    Customer Account Status
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    Invoice and Billing History
+                  </li>
+                </ul>
+              </div>
+              
+              <div className="rounded-xl border border-slate-200 p-5">
+                <h3 className="font-semibold text-slate-900 mb-3">Analysis Process</h3>
+                <ol className="space-y-2 text-sm text-slate-600 list-decimal list-inside">
+                  <li>Cross-reference customer IDs between billing and product data</li>
+                  <li>Identify discrepancies (active billing with no usage, usage with no billing)</li>
+                  <li>Detect payment failures and churn risk patterns</li>
+                  <li>Confidence scoring based on data quality</li>
+                </ol>
+              </div>
+            </div>
+          </section>
+
+          {/* Recommended Next Steps */}
+          <section>
+            <h2 className="text-xl font-bold text-slate-900 mb-6">Recommended Next Steps</h2>
+            
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-xl border-2 border-rose-200 bg-rose-50 p-5">
+                <h3 className="font-bold text-rose-800 mb-1">Immediate (This Week)</h3>
+                <ul className="space-y-2 text-sm text-rose-700">
+                  <li>• Review top 5 anomalies with finance</li>
+                  <li>• Begin recovery for high-confidence issues</li>
+                  <li>• Contact at-risk customers</li>
+                </ul>
+              </div>
+              
+              <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-5">
+                <h3 className="font-bold text-amber-800 mb-1">Short-Term (This Month)</h3>
+                <ul className="space-y-2 text-sm text-amber-700">
+                  <li>• Implement real-time monitoring</li>
+                  <li>• Fix billing sync issues</li>
+                  <li>• Review dunning sequences</li>
+                </ul>
+              </div>
+              
+              <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-5">
+                <h3 className="font-bold text-emerald-800 mb-1">Long-Term (Next Quarter)</h3>
+                <ul className="space-y-2 text-sm text-emerald-700">
+                  <li>• Event-driven billing architecture</li>
+                  <li>• Automated reconciliation</li>
+                  <li>• Continuous revenue monitoring</li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          {/* Footer */}
+          <div className="mt-12 pt-8 border-t border-slate-200 text-center text-sm text-slate-500">
+            <p>This audit was performed by <strong className="text-slate-900">Vynt</strong></p>
+            <p className="text-slate-400">Revenue Observability for Modern SaaS</p>
+          </div>
         </div>
       </div>
     </div>

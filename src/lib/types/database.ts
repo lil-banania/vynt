@@ -12,6 +12,12 @@ export type AnomalyCategory =
   | "unbilled_usage"
   | "pricing_mismatch"
   | "duplicate_charge"
+  | "failed_payment"
+  | "high_refund_rate"
+  | "dispute_chargeback"
+  | "trial_abuse"
+  | "revenue_leakage"
+  | "involuntary_churn"
   | "other";
 export type AnomalyConfidence = "low" | "medium" | "high";
 export type UserRole =

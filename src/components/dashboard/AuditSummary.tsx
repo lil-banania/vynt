@@ -1,14 +1,15 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Audit } from "@/lib/types/database";
+import { AlertTriangle, Clock, DollarSign, TrendingUp, Users, FileText, Shield, Zap, TrendingDown } from "lucide-react";
+
+import { Audit, AnomalyCategory } from "@/lib/types/database";
+
+type CategoryData = {
+  count: number;
+  impact: number;
+};
 
 type AuditSummaryProps = {
   audit: Audit & { organization_name?: string };
-  anomalyCounts: {
-    zombie_subscription: number;
-    unbilled_usage: number;
-    pricing_mismatch: number;
-    duplicate_charge: number;
-  };
+  categoryBreakdown: Record<string, CategoryData>;
 };
 
 const formatCurrency = (value: number | null) => {
@@ -22,141 +23,155 @@ const formatCurrency = (value: number | null) => {
   });
 };
 
-const formatDateRange = (start: string, end: string) => {
-  const startDate = new Date(start);
-  const endDate = new Date(end);
-  const format = (date: Date) =>
-    date.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
+const formatDateRange = (start: string | null, end: string | null) => {
+  if (!start || !end) return "Period not set";
+  const format = (value: string) =>
+    new Date(value).toLocaleDateString("en-US", {
+      month: "long",
       year: "numeric",
     });
-  return `${format(startDate)} - ${format(endDate)}`;
+  return `${format(start)} - ${format(end)}`;
 };
 
-const AuditSummary = ({ audit, anomalyCounts }: AuditSummaryProps) => {
-  const totalAnomalies =
-    anomalyCounts.zombie_subscription +
-    anomalyCounts.unbilled_usage +
-    anomalyCounts.pricing_mismatch +
-    anomalyCounts.duplicate_charge;
+const categoryConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
+  zombie_subscription: { label: "Zombie Subscription", color: "bg-rose-500", icon: Users },
+  unbilled_usage: { label: "Unbilled Usage", color: "bg-amber-500", icon: FileText },
+  pricing_mismatch: { label: "Pricing Mismatch", color: "bg-purple-500", icon: DollarSign },
+  duplicate_charge: { label: "Duplicate Charge", color: "bg-orange-500", icon: AlertTriangle },
+  failed_payment: { label: "Failed Payment", color: "bg-red-500", icon: TrendingDown },
+  high_refund_rate: { label: "High Refund Rate", color: "bg-pink-500", icon: TrendingDown },
+  dispute_chargeback: { label: "Dispute/Chargeback", color: "bg-red-600", icon: Shield },
+  trial_abuse: { label: "Trial Abuse", color: "bg-yellow-500", icon: Zap },
+  revenue_leakage: { label: "Revenue Leakage", color: "bg-cyan-500", icon: TrendingDown },
+  involuntary_churn: { label: "Involuntary Churn", color: "bg-slate-500", icon: Clock },
+  other: { label: "Other", color: "bg-slate-400", icon: AlertTriangle },
+};
 
-  const categoryRows = [
-    {
-      key: "zombie_subscription",
-      label: "Zombie Subscriptions",
-      value: anomalyCounts.zombie_subscription,
-      color: "bg-red-500",
-    },
-    {
-      key: "unbilled_usage",
-      label: "Unbilled Usage",
-      value: anomalyCounts.unbilled_usage,
-      color: "bg-orange-500",
-    },
-    {
-      key: "pricing_mismatch",
-      label: "Pricing Mismatch",
-      value: anomalyCounts.pricing_mismatch,
-      color: "bg-yellow-400",
-    },
-    {
-      key: "duplicate_charge",
-      label: "Duplicate Charge",
-      value: anomalyCounts.duplicate_charge,
-      color: "bg-blue-500",
-    },
-  ];
-
-  const maxValue = Math.max(1, ...categoryRows.map((row) => row.value));
+const AuditSummary = ({ audit, categoryBreakdown }: AuditSummaryProps) => {
+  const totalAnomalies = Object.values(categoryBreakdown).reduce((sum, cat) => sum + cat.count, 0);
+  const estimatedRecovery = (audit.annual_revenue_at_risk ?? 0) * 0.85;
 
   return (
-    <div className="space-y-6">
-      <Card className="border-slate-200 shadow-sm">
-        <CardHeader className="space-y-2">
-          <CardTitle className="text-2xl font-semibold text-slate-900">
-            {audit.organization_name ?? "Organization"}
-          </CardTitle>
-          <p className="text-sm text-slate-500">
-            {audit.audit_period_start && audit.audit_period_end
-              ? formatDateRange(
-                  audit.audit_period_start,
-                  audit.audit_period_end
-                )
-              : "Audit period"}
+    <div className="space-y-8">
+      {/* Report Header */}
+      <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-slate-900 to-slate-800 px-8 py-10 text-white">
+        <p className="text-sm font-medium uppercase tracking-wider text-slate-400 mb-2">Revenue Audit Report</p>
+        <h1 className="text-3xl font-bold mb-2">
+          {audit.organization_name ?? "Organization"}
+        </h1>
+        <p className="text-slate-400">
+          Audit Period: {formatDateRange(audit.audit_period_start, audit.audit_period_end)}
+        </p>
+        {audit.published_at && (
+          <p className="text-slate-500 text-sm mt-1">
+            Published: {new Date(audit.published_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
           </p>
-        </CardHeader>
-      </Card>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card className="border-slate-200 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500">
-              Total Anomalies Detected
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold text-slate-900">
-            {totalAnomalies}
-          </CardContent>
-        </Card>
-
-        <Card className="border-slate-200 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500">
-              Annual Revenue at Risk
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold text-slate-900">
-            {formatCurrency(audit.annual_revenue_at_risk)}
-          </CardContent>
-        </Card>
-
-        <Card className="border-slate-200 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500">
-              Average Time to Detection
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold text-slate-900">
-            4-7 months
-          </CardContent>
-        </Card>
-
-        <Card className="border-slate-200 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500">
-              Estimated Recovery Rate
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold text-slate-900">
-            85-90%
-          </CardContent>
-        </Card>
+        )}
       </div>
 
-      <Card className="border-slate-200 shadow-sm">
-        <CardHeader>
-          <CardTitle className="text-base font-semibold text-slate-900">
-            Breakdown by Category
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {categoryRows.map((row) => (
-            <div key={row.key} className="space-y-2">
-              <div className="flex items-center justify-between text-sm text-slate-600">
-                <span>{row.label}</span>
-                <span className="font-medium text-slate-900">{row.value}</span>
-              </div>
-              <div className="h-2 rounded-full bg-slate-100">
-                <div
-                  className={`h-2 rounded-full ${row.color}`}
-                  style={{ width: `${(row.value / maxValue) * 100}%` }}
-                />
-              </div>
+      {/* Executive Summary Cards */}
+      <div>
+        <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
+          <AlertTriangle className="h-5 w-5 text-slate-600" />
+          Executive Summary
+        </h2>
+        
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5">
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-500 mb-1">
+              <AlertTriangle className="h-4 w-4" />
+              Total Anomalies
             </div>
-          ))}
-        </CardContent>
-      </Card>
+            <div className="text-4xl font-bold text-slate-900">
+              {totalAnomalies}
+            </div>
+          </div>
+          
+          <div className="rounded-xl border border-rose-200 bg-gradient-to-br from-rose-50 to-white p-5">
+            <div className="flex items-center gap-2 text-sm font-medium text-rose-600 mb-1">
+              <DollarSign className="h-4 w-4" />
+              Annual Revenue at Risk
+            </div>
+            <div className="text-4xl font-bold text-rose-600">
+              {formatCurrency(audit.annual_revenue_at_risk)}
+            </div>
+          </div>
+          
+          <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5">
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-500 mb-1">
+              <Clock className="h-4 w-4" />
+              Avg. Detection Time
+            </div>
+            <div className="text-4xl font-bold text-slate-900">
+              4-7 <span className="text-lg font-normal text-slate-500">mo</span>
+            </div>
+          </div>
+          
+          <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-5">
+            <div className="flex items-center gap-2 text-sm font-medium text-emerald-600 mb-1">
+              <TrendingUp className="h-4 w-4" />
+              Estimated Recovery
+            </div>
+            <div className="text-4xl font-bold text-emerald-600">
+              {formatCurrency(estimatedRecovery)}
+            </div>
+            <div className="text-xs text-emerald-600 mt-1">85-90% recovery rate</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Breakdown by Category */}
+      <div>
+        <h2 className="text-xl font-bold text-slate-900 mb-4">Breakdown by Category</h2>
+        
+        <div className="overflow-hidden rounded-xl border border-slate-200">
+          <table className="w-full">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">Category</th>
+                <th className="px-6 py-3 text-center text-xs font-semibold uppercase tracking-wider text-slate-600">Count</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-600">Annual Impact</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {Object.entries(categoryBreakdown)
+                .filter(([, data]) => data.count > 0)
+                .sort((a, b) => b[1].impact - a[1].impact)
+                .map(([category, data]) => {
+                  const config = categoryConfig[category] ?? categoryConfig.other;
+                  const Icon = config.icon;
+                  return (
+                    <tr key={category} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className={`rounded-lg p-2 ${config.color}`}>
+                            <Icon className="h-4 w-4 text-white" />
+                          </div>
+                          <span className="font-medium text-slate-900">{config.label}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className="inline-flex items-center justify-center rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
+                          {data.count}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <span className="font-semibold text-rose-600">{formatCurrency(data.impact)}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+            <tfoot>
+              <tr className="bg-slate-900 text-white">
+                <td className="px-6 py-4 font-semibold">Total</td>
+                <td className="px-6 py-4 text-center font-semibold">{totalAnomalies}</td>
+                <td className="px-6 py-4 text-right font-semibold">{formatCurrency(audit.annual_revenue_at_risk)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
     </div>
   );
 };
