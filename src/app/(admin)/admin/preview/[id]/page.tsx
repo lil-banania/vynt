@@ -1,6 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, AlertTriangle, Users, DollarSign, FileText, Target } from "lucide-react";
+import {
+  ArrowLeft,
+  AlertTriangle,
+  Users,
+  DollarSign,
+  FileText,
+  Target,
+  Clock,
+  TrendingDown,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/server";
