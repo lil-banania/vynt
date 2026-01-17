@@ -7,18 +7,12 @@ export type AuditStatus =
   | "completed"
   | "published";
 export type AnomalyStatus = "detected" | "verified" | "resolved" | "dismissed";
+// Database CHECK constraint only allows these 4 categories
 export type AnomalyCategory =
   | "zombie_subscription"
   | "unbilled_usage"
   | "pricing_mismatch"
-  | "duplicate_charge"
-  | "failed_payment"
-  | "high_refund_rate"
-  | "dispute_chargeback"
-  | "trial_abuse"
-  | "revenue_leakage"
-  | "involuntary_churn"
-  | "other";
+  | "duplicate_charge";
 export type AnomalyConfidence = "low" | "medium" | "high";
 export type UserRole =
   | "owner"

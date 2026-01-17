@@ -51,13 +51,6 @@ const categoryLabelMap: Record<AnomalyCategory, string> = {
   unbilled_usage: "Unbilled Usage",
   pricing_mismatch: "Pricing Mismatch",
   duplicate_charge: "Duplicate Charge",
-  failed_payment: "Failed Payment",
-  high_refund_rate: "High Refund Rate",
-  dispute_chargeback: "Dispute/Chargeback",
-  trial_abuse: "Trial Abuse",
-  revenue_leakage: "Revenue Leakage",
-  involuntary_churn: "Involuntary Churn",
-  other: "Other",
 };
 
 const confidenceLabelMap: Record<AnomalyConfidence, string> = {
@@ -76,18 +69,6 @@ const categoryBadgeClass = (category: AnomalyCategory) => {
       return "bg-purple-100 text-purple-700 border-purple-200";
     case "duplicate_charge":
       return "bg-orange-100 text-orange-700 border-orange-200";
-    case "failed_payment":
-      return "bg-red-100 text-red-700 border-red-200";
-    case "high_refund_rate":
-      return "bg-pink-100 text-pink-700 border-pink-200";
-    case "dispute_chargeback":
-      return "bg-red-100 text-red-800 border-red-200";
-    case "trial_abuse":
-      return "bg-yellow-100 text-yellow-700 border-yellow-200";
-    case "revenue_leakage":
-      return "bg-cyan-100 text-cyan-700 border-cyan-200";
-    case "involuntary_churn":
-      return "bg-slate-200 text-slate-700 border-slate-300";
     default:
       return "bg-slate-100 text-slate-700 border-slate-200";
   }
@@ -192,12 +173,6 @@ const AnomalyTable = ({ anomalies, onFilterChange }: AnomalyTableProps) => {
             <SelectItem value="unbilled_usage">Unbilled Usage</SelectItem>
             <SelectItem value="pricing_mismatch">Pricing Mismatch</SelectItem>
             <SelectItem value="duplicate_charge">Duplicate Charge</SelectItem>
-            <SelectItem value="failed_payment">Failed Payment</SelectItem>
-            <SelectItem value="high_refund_rate">High Refund Rate</SelectItem>
-            <SelectItem value="dispute_chargeback">Dispute/Chargeback</SelectItem>
-            <SelectItem value="trial_abuse">Trial Abuse</SelectItem>
-            <SelectItem value="revenue_leakage">Revenue Leakage</SelectItem>
-            <SelectItem value="involuntary_churn">Involuntary Churn</SelectItem>
           </SelectContent>
         </Select>
 

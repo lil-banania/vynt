@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { AlertTriangle, Clock, DollarSign, Shield, TrendingDown, Users, FileText, Zap, Target, ArrowLeft } from "lucide-react";
+import { AlertTriangle, DollarSign, Users, FileText, Target, ArrowLeft } from "lucide-react";
 
 import AuditSummary from "@/components/dashboard/AuditSummary";
 import AnomalyTable from "@/components/dashboard/AnomalyTable";
@@ -29,18 +29,12 @@ const formatCurrency = (value: number | null) => {
   });
 };
 
+// Only 4 categories allowed by database CHECK constraint
 const categoryConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
   zombie_subscription: { label: "Zombie Subscription", color: "bg-rose-500", icon: Users },
   unbilled_usage: { label: "Unbilled Usage", color: "bg-amber-500", icon: FileText },
   pricing_mismatch: { label: "Pricing Mismatch", color: "bg-purple-500", icon: DollarSign },
   duplicate_charge: { label: "Duplicate Charge", color: "bg-orange-500", icon: AlertTriangle },
-  failed_payment: { label: "Failed Payment", color: "bg-red-500", icon: TrendingDown },
-  high_refund_rate: { label: "High Refund Rate", color: "bg-pink-500", icon: TrendingDown },
-  dispute_chargeback: { label: "Dispute/Chargeback", color: "bg-red-600", icon: Shield },
-  trial_abuse: { label: "Trial Abuse", color: "bg-yellow-500", icon: Zap },
-  revenue_leakage: { label: "Revenue Leakage", color: "bg-cyan-500", icon: TrendingDown },
-  involuntary_churn: { label: "Involuntary Churn", color: "bg-slate-500", icon: Clock },
-  other: { label: "Other", color: "bg-slate-400", icon: AlertTriangle },
 };
 
 const confidenceConfig: Record<AnomalyConfidence, { label: string; color: string }> = {

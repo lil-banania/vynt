@@ -1,6 +1,6 @@
-import { AlertTriangle, Clock, DollarSign, TrendingUp, Users, FileText, Shield, Zap, TrendingDown } from "lucide-react";
+import { AlertTriangle, Clock, DollarSign, TrendingUp, Users, FileText } from "lucide-react";
 
-import { Audit, AnomalyCategory } from "@/lib/types/database";
+import { Audit } from "@/lib/types/database";
 
 type CategoryData = {
   count: number;
@@ -33,18 +33,12 @@ const formatDateRange = (start: string | null, end: string | null) => {
   return `${format(start)} - ${format(end)}`;
 };
 
+// Only 4 categories allowed by database CHECK constraint
 const categoryConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
   zombie_subscription: { label: "Zombie Subscription", color: "bg-rose-500", icon: Users },
   unbilled_usage: { label: "Unbilled Usage", color: "bg-amber-500", icon: FileText },
   pricing_mismatch: { label: "Pricing Mismatch", color: "bg-purple-500", icon: DollarSign },
   duplicate_charge: { label: "Duplicate Charge", color: "bg-orange-500", icon: AlertTriangle },
-  failed_payment: { label: "Failed Payment", color: "bg-red-500", icon: TrendingDown },
-  high_refund_rate: { label: "High Refund Rate", color: "bg-pink-500", icon: TrendingDown },
-  dispute_chargeback: { label: "Dispute/Chargeback", color: "bg-red-600", icon: Shield },
-  trial_abuse: { label: "Trial Abuse", color: "bg-yellow-500", icon: Zap },
-  revenue_leakage: { label: "Revenue Leakage", color: "bg-cyan-500", icon: TrendingDown },
-  involuntary_churn: { label: "Involuntary Churn", color: "bg-slate-500", icon: Clock },
-  other: { label: "Other", color: "bg-slate-400", icon: AlertTriangle },
 };
 
 const AuditSummary = ({ audit, categoryBreakdown }: AuditSummaryProps) => {

@@ -777,23 +777,26 @@ export async function POST(request: Request) {
     }
   }
 
-  // VALID database categories - only these are allowed by the CHECK constraint
-  const VALID_CATEGORIES = ["zombie_subscription", "unbilled_usage", "pricing_mismatch", "duplicate_charge", "other"] as const;
+  // VALID database categories - from CHECK constraint
+  // CHECK ((category = ANY (ARRAY['zombie_subscription', 'unbilled_usage', 'pricing_mismatch', 'duplicate_charge'])))
+  const VALID_CATEGORIES = ["zombie_subscription", "unbilled_usage", "pricing_mismatch", "duplicate_charge"] as const;
   type ValidCategory = typeof VALID_CATEGORIES[number];
 
-  // Map new/extended categories to valid database categories
+  // Map all categories to one of the 4 valid database categories
   const categoryMapping: Record<string, ValidCategory> = {
+    // Direct mappings
     zombie_subscription: "zombie_subscription",
     unbilled_usage: "unbilled_usage",
     pricing_mismatch: "pricing_mismatch",
     duplicate_charge: "duplicate_charge",
-    failed_payment: "pricing_mismatch",
-    high_refund_rate: "pricing_mismatch",
-    dispute_chargeback: "duplicate_charge",
-    trial_abuse: "other",
-    revenue_leakage: "unbilled_usage",
-    involuntary_churn: "other",
-    other: "other",
+    // Extended categories mapped to closest match
+    failed_payment: "pricing_mismatch",       // Payment issues → pricing
+    high_refund_rate: "pricing_mismatch",     // Refund issues → pricing
+    dispute_chargeback: "duplicate_charge",   // Disputes → duplicate/charge issues
+    trial_abuse: "unbilled_usage",            // Trial abuse → unbilled
+    revenue_leakage: "unbilled_usage",        // Revenue leakage → unbilled
+    involuntary_churn: "zombie_subscription", // Churn risk → zombie
+    other: "pricing_mismatch",                // Default to pricing
   };
 
   // VALID status values
@@ -819,14 +822,13 @@ export async function POST(request: Request) {
         mappedCategory = "other";
       }
       
-      // Double-check it's a valid category
+      // Double-check it's a valid category (one of the 4 allowed)
       if (!VALID_CATEGORIES.includes(mappedCategory as ValidCategory)) {
-        console.error(`Invalid mapped category "${mappedCategory}", forcing to "other"`);
-        mappedCategory = "other";
+        console.error(`Invalid mapped category "${mappedCategory}", forcing to "pricing_mismatch"`);
+        mappedCategory = "pricing_mismatch";
       }
       
-      // TEMPORARY FIX: Force all to "other" to test if category is the issue
-      mappedCategory = "other";
+      // Use the mapped category (now guaranteed to be one of 4 valid values)
       
       // Validate status, default to "detected"
       const validStatus = VALID_STATUSES.includes(a.status as typeof VALID_STATUSES[number]) 

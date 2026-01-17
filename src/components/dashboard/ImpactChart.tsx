@@ -46,34 +46,6 @@ const CATEGORY_CONFIG: Record<
     label: "Duplicate Charge",
     color: "#f97316",
   },
-  failed_payment: {
-    label: "Failed Payment",
-    color: "#ef4444",
-  },
-  high_refund_rate: {
-    label: "High Refund Rate",
-    color: "#ec4899",
-  },
-  dispute_chargeback: {
-    label: "Dispute/Chargeback",
-    color: "#dc2626",
-  },
-  trial_abuse: {
-    label: "Trial Abuse",
-    color: "#eab308",
-  },
-  revenue_leakage: {
-    label: "Revenue Leakage",
-    color: "#06b6d4",
-  },
-  involuntary_churn: {
-    label: "Involuntary Churn",
-    color: "#64748b",
-  },
-  other: {
-    label: "Other",
-    color: "#94a3b8",
-  },
 };
 
 const ImpactChart = ({ anomalies }: ImpactChartProps) => {
