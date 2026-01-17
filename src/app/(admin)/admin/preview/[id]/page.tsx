@@ -103,8 +103,9 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
   const patterns: { title: string; description: string; percentage: number }[] = [];
   
   const zombieCount = anomalies.filter(a => a.category === "zombie_subscription").length;
-  const failedCount = anomalies.filter(a => a.category === "failed_payment" || a.category === "involuntary_churn").length;
-  const unbilledCount = anomalies.filter(a => a.category === "unbilled_usage" || a.category === "revenue_leakage").length;
+  const pricingCount = anomalies.filter(a => a.category === "pricing_mismatch").length;
+  const unbilledCount = anomalies.filter(a => a.category === "unbilled_usage").length;
+  const duplicateCount = anomalies.filter(a => a.category === "duplicate_charge").length;
   
   if (zombieCount > 0) {
     patterns.push({
@@ -114,11 +115,11 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
     });
   }
   
-  if (failedCount > 0) {
+  if (pricingCount > 0) {
     patterns.push({
-      title: "Payment Recovery Opportunity",
-      description: "Failed payments and churn risk from payment issues. Implement dunning sequences and smart retries.",
-      percentage: Math.round((failedCount / anomalies.length) * 100) || 0,
+      title: "Pricing & Payment Issues",
+      description: "Pricing mismatches, failed payments, or refund issues detected. Review billing configuration and dunning sequences.",
+      percentage: Math.round((pricingCount / anomalies.length) * 100) || 0,
     });
   }
   
@@ -127,6 +128,14 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
       title: "Billing Gap Issues",
       description: "Usage events not properly invoiced. Review metering pipeline and invoice generation logic.",
       percentage: Math.round((unbilledCount / anomalies.length) * 100) || 0,
+    });
+  }
+  
+  if (duplicateCount > 0) {
+    patterns.push({
+      title: "Duplicate & Dispute Risk",
+      description: "Duplicate charges or disputed transactions detected. Implement idempotency keys and review charge logic.",
+      percentage: Math.round((duplicateCount / anomalies.length) * 100) || 0,
     });
   }
 
