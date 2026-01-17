@@ -813,13 +813,13 @@ export async function POST(request: Request) {
 
     // Sanitize and validate all anomalies before insert
     const sanitizedAnomalies = anomalies.map(a => {
-      // Map category to valid value, default to "other"
+    // Map category to valid value, default to "pricing_mismatch"
       let mappedCategory = categoryMapping[a.category];
       
-      // If not found in mapping, use "other"
+    // If not found in mapping, default to "pricing_mismatch"
       if (!mappedCategory) {
-        console.warn(`Unknown category "${a.category}", mapping to "other"`);
-        mappedCategory = "other";
+      console.warn(`Unknown category "${a.category}", mapping to "pricing_mismatch"`);
+      mappedCategory = "pricing_mismatch";
       }
       
       // Double-check it's a valid category (one of the 4 allowed)
