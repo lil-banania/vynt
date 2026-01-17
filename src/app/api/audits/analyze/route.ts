@@ -777,53 +777,79 @@ export async function POST(request: Request) {
     }
   }
 
-  // Map new categories to database-compatible categories
-  // Database may only have: zombie_subscription, unbilled_usage, pricing_mismatch, duplicate_charge, other
-  const categoryMapping: Record<string, string> = {
+  // VALID database categories - only these are allowed by the CHECK constraint
+  const VALID_CATEGORIES = ["zombie_subscription", "unbilled_usage", "pricing_mismatch", "duplicate_charge", "other"] as const;
+  type ValidCategory = typeof VALID_CATEGORIES[number];
+
+  // Map new/extended categories to valid database categories
+  const categoryMapping: Record<string, ValidCategory> = {
     zombie_subscription: "zombie_subscription",
     unbilled_usage: "unbilled_usage",
     pricing_mismatch: "pricing_mismatch",
     duplicate_charge: "duplicate_charge",
-    failed_payment: "pricing_mismatch",      // Map to pricing_mismatch
-    high_refund_rate: "pricing_mismatch",    // Map to pricing_mismatch
-    dispute_chargeback: "duplicate_charge",  // Map to duplicate_charge
-    trial_abuse: "other",                    // Map to other
-    revenue_leakage: "unbilled_usage",       // Map to unbilled_usage
-    involuntary_churn: "other",              // Map to other
+    failed_payment: "pricing_mismatch",
+    high_refund_rate: "pricing_mismatch",
+    dispute_chargeback: "duplicate_charge",
+    trial_abuse: "other",
+    revenue_leakage: "unbilled_usage",
+    involuntary_churn: "other",
     other: "other",
   };
 
+  // VALID status values
+  const VALID_STATUSES = ["detected", "verified", "resolved", "dismissed"] as const;
+  
+  // VALID confidence values
+  const VALID_CONFIDENCES = ["low", "medium", "high"] as const;
+
   // Insert anomalies
   if (anomalies.length > 0) {
-    // Ensure metadata is properly serialized and categories are mapped
-    // Note: customer_id must not be null in the database
-    const sanitizedAnomalies = anomalies.map(a => ({
-      audit_id: a.audit_id,
-      category: categoryMapping[a.category] || "other",
-      customer_id: a.customer_id || "SYSTEM", // Use "SYSTEM" for aggregate/summary anomalies
-      status: a.status,
-      confidence: a.confidence,
-      annual_impact: a.annual_impact,
-      monthly_impact: a.monthly_impact,
-      description: a.description || null,
-      root_cause: a.root_cause || null,
-      recommendation: a.recommendation || null,
-      detected_at: a.detected_at,
-      // Store original category in metadata for reference
-      metadata: a.metadata 
-        ? JSON.parse(JSON.stringify({ ...a.metadata, original_category: a.category })) 
-        : { original_category: a.category },
-    }));
+    // Sanitize and validate all anomalies before insert
+    const sanitizedAnomalies = anomalies.map(a => {
+      // Map category to valid value, default to "other"
+      const mappedCategory = categoryMapping[a.category] || "other";
+      
+      // Validate status, default to "detected"
+      const validStatus = VALID_STATUSES.includes(a.status as typeof VALID_STATUSES[number]) 
+        ? a.status 
+        : "detected";
+      
+      // Validate confidence, default to "medium"
+      const validConfidence = VALID_CONFIDENCES.includes(a.confidence as typeof VALID_CONFIDENCES[number])
+        ? a.confidence
+        : "medium";
+
+      return {
+        audit_id: a.audit_id,
+        category: mappedCategory,
+        customer_id: a.customer_id || "SYSTEM",
+        status: validStatus,
+        confidence: validConfidence,
+        annual_impact: typeof a.annual_impact === "number" ? a.annual_impact : 0,
+        monthly_impact: typeof a.monthly_impact === "number" ? a.monthly_impact : 0,
+        description: typeof a.description === "string" ? a.description : null,
+        root_cause: typeof a.root_cause === "string" ? a.root_cause : null,
+        recommendation: typeof a.recommendation === "string" ? a.recommendation : null,
+        detected_at: a.detected_at || new Date().toISOString(),
+        metadata: a.metadata 
+          ? JSON.parse(JSON.stringify({ ...a.metadata, original_category: a.category })) 
+          : { original_category: a.category },
+      };
+    });
+
+    // Log first anomaly for debugging
+    console.log("Inserting anomalies. Sample:", JSON.stringify(sanitizedAnomalies[0], null, 2));
 
     const { error: insertError } = await adminSupabase.from("anomalies").insert(sanitizedAnomalies);
     if (insertError) {
       console.error("Failed to insert anomalies:", insertError);
-      console.error("First anomaly sample:", JSON.stringify(sanitizedAnomalies[0], null, 2));
+      console.error("Sample anomaly:", JSON.stringify(sanitizedAnomalies[0], null, 2));
       return NextResponse.json({ 
         error: "Failed to save anomalies.", 
         details: insertError.message,
         code: insertError.code,
-        hint: insertError.hint
+        hint: insertError.hint,
+        sample: sanitizedAnomalies[0]
       }, { status: 500 });
     }
   }

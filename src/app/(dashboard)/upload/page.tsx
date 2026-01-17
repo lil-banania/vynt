@@ -109,6 +109,9 @@ const UploadPage = () => {
         if (data?.hint) {
           errorMsg += ` Hint: ${data.hint}`;
         }
+        if (data?.sample) {
+          console.error("Failed anomaly sample:", data.sample);
+        }
         throw new Error(errorMsg);
       }
 
