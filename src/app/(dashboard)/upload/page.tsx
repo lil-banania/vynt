@@ -109,8 +109,13 @@ const UploadPage = () => {
         if (data?.hint) {
           errorMsg += ` Hint: ${data.hint}`;
         }
+        if (data?.mappedCategories) {
+          errorMsg += ` Categories: ${data.mappedCategories.join(", ")}`;
+        }
         if (data?.sample) {
           console.error("Failed anomaly sample:", data.sample);
+          console.error("Original categories:", data.originalCategories);
+          console.error("Mapped categories:", data.mappedCategories);
         }
         throw new Error(errorMsg);
       }

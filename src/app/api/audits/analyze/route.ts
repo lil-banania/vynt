@@ -804,10 +804,29 @@ export async function POST(request: Request) {
 
   // Insert anomalies
   if (anomalies.length > 0) {
+    // Collect all unique categories being used for debugging
+    const uniqueCategories = [...new Set(anomalies.map(a => a.category))];
+    console.log("Original categories in anomalies:", uniqueCategories);
+
     // Sanitize and validate all anomalies before insert
     const sanitizedAnomalies = anomalies.map(a => {
       // Map category to valid value, default to "other"
-      const mappedCategory = categoryMapping[a.category] || "other";
+      let mappedCategory = categoryMapping[a.category];
+      
+      // If not found in mapping, use "other"
+      if (!mappedCategory) {
+        console.warn(`Unknown category "${a.category}", mapping to "other"`);
+        mappedCategory = "other";
+      }
+      
+      // Double-check it's a valid category
+      if (!VALID_CATEGORIES.includes(mappedCategory as ValidCategory)) {
+        console.error(`Invalid mapped category "${mappedCategory}", forcing to "other"`);
+        mappedCategory = "other";
+      }
+      
+      // TEMPORARY FIX: Force all to "other" to test if category is the issue
+      mappedCategory = "other";
       
       // Validate status, default to "detected"
       const validStatus = VALID_STATUSES.includes(a.status as typeof VALID_STATUSES[number]) 
@@ -837,19 +856,22 @@ export async function POST(request: Request) {
       };
     });
 
-    // Log first anomaly for debugging
-    console.log("Inserting anomalies. Sample:", JSON.stringify(sanitizedAnomalies[0], null, 2));
+    // Log all unique mapped categories
+    const uniqueMappedCategories = [...new Set(sanitizedAnomalies.map(a => a.category))];
+    console.log("Mapped categories being inserted:", uniqueMappedCategories);
+    console.log("First anomaly sample:", JSON.stringify(sanitizedAnomalies[0], null, 2));
 
     const { error: insertError } = await adminSupabase.from("anomalies").insert(sanitizedAnomalies);
     if (insertError) {
       console.error("Failed to insert anomalies:", insertError);
-      console.error("Sample anomaly:", JSON.stringify(sanitizedAnomalies[0], null, 2));
       return NextResponse.json({ 
         error: "Failed to save anomalies.", 
         details: insertError.message,
         code: insertError.code,
         hint: insertError.hint,
-        sample: sanitizedAnomalies[0]
+        sample: sanitizedAnomalies[0],
+        originalCategories: uniqueCategories,
+        mappedCategories: uniqueMappedCategories
       }, { status: 500 });
     }
   }
