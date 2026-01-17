@@ -55,8 +55,9 @@ export async function POST() {
     }
 
     const fallbackName =
+      (user.user_metadata as { company_name?: string } | undefined)?.company_name ||
       profile?.full_name ||
-      user.user_metadata?.full_name ||
+      (user.user_metadata as { full_name?: string } | undefined)?.full_name ||
       user.email.split("@")[0] ||
       "New Organization";
 

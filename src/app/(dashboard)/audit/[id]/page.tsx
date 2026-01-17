@@ -64,7 +64,12 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
     notFound();
   }
 
-  const isAdmin = profile.role === "vynt_admin";
+  const metadataRole =
+    (user.app_metadata as { role?: string } | undefined)?.role ??
+    (user.user_metadata as { role?: string } | undefined)?.role ??
+    null;
+  const isAdmin =
+    profile.role === "vynt_admin" || metadataRole === "vynt_admin";
 
   if (!isAdmin && audit.organization_id !== profile.organization_id) {
     redirect("/dashboard");

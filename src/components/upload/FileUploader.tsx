@@ -15,7 +15,8 @@ type FileType = "usage_logs" | "stripe_export";
 
 type FileUploaderProps = {
   fileType: FileType;
-  auditId: string;
+  auditId: string | null;
+  onEnsureAudit?: () => Promise<string>;
   onUploadComplete: (fileId: string, rowCount: number) => void;
 };
 
@@ -41,6 +42,7 @@ const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 const FileUploader = ({
   fileType,
   auditId,
+  onEnsureAudit,
   onUploadComplete,
 }: FileUploaderProps) => {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -132,9 +134,17 @@ const FileUploader = ({
         setPreviewHeaders(headers);
         setPreviewRows(rows.slice(0, 5));
 
+        let resolvedAuditId = auditId;
+        if (!resolvedAuditId) {
+          if (!onEnsureAudit) {
+            throw new Error("Unable to create an audit for this upload.");
+          }
+          resolvedAuditId = await onEnsureAudit();
+        }
+
         const formData = new FormData();
         formData.append("file", file);
-        formData.append("auditId", auditId);
+        formData.append("auditId", resolvedAuditId);
         formData.append("fileType", fileType);
         formData.append("rowCount", String(rows.length));
 
@@ -168,7 +178,7 @@ const FileUploader = ({
         stopProgress();
       }
     },
-    [auditId, fileType, onUploadComplete]
+    [auditId, fileType, onEnsureAudit, onUploadComplete]
   );
 
   const handleFiles = (files: FileList | null) => {

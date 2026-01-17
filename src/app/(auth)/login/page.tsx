@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -130,6 +131,15 @@ const LoginPage = () => {
           >
             Sign in with Google
           </Button>
+          <p className="mt-6 text-center text-sm text-muted-foreground">
+            Don't have an account?{" "}
+            <Link
+              href="/signup"
+              className="font-medium text-slate-900 hover:underline"
+            >
+              Sign up
+            </Link>
+          </p>
         </CardContent>
       </Card>
     </div>

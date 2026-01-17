@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import FileUploader from "@/components/upload/FileUploader";
@@ -23,54 +23,59 @@ const UploadPage = () => {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
   const [auditId, setAuditId] = useState<string | null>(null);
-  const [isCreatingAudit, setIsCreatingAudit] = useState(true);
+  const [isCreatingAudit, setIsCreatingAudit] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [usageUploaded, setUsageUploaded] = useState(false);
   const [stripeUploaded, setStripeUploaded] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
 
-  useEffect(() => {
-    let isMounted = true;
+  const createAuditInFlight = useRef<Promise<string> | null>(null);
 
-    const createAudit = async () => {
-      try {
-        const response = await fetch("/api/audits/create", {
-          method: "POST",
-        });
-        const data = await response.json().catch(() => null);
+  const ensureAudit = async () => {
+    if (auditId) {
+      return auditId;
+    }
 
-        if (!response.ok) {
-          throw new Error(
-            data?.error ??
-              "An error occurred while creating the audit."
-          );
-        }
+    if (createAuditInFlight.current) {
+      return createAuditInFlight.current;
+    }
 
-        if (isMounted) {
-          setAuditId(data?.auditId ?? null);
-        }
-      } catch (error) {
-        if (isMounted) {
-          setErrorMessage(
-            error instanceof Error
-              ? error.message
-              : "An error occurred while creating the audit."
-          );
-        }
-      } finally {
-        if (isMounted) {
-          setIsCreatingAudit(false);
-        }
+    setIsCreatingAudit(true);
+    setErrorMessage(null);
+
+    const promise = (async () => {
+      const response = await fetch("/api/audits/create", {
+        method: "POST",
+      });
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data?.auditId) {
+        throw new Error(
+          data?.error ?? "An error occurred while creating the audit."
+        );
       }
-    };
 
-    createAudit();
+      setAuditId(data.auditId);
+      return data.auditId as string;
+    })();
 
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+    createAuditInFlight.current = promise;
+
+    try {
+      return await promise;
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "An error occurred while creating the audit."
+      );
+      throw error;
+    } finally {
+      createAuditInFlight.current = null;
+      setIsCreatingAudit(false);
+    }
+  };
 
   const handleStartAnalysis = async () => {
     if (!auditId || !usageUploaded || !stripeUploaded) {
@@ -150,7 +155,7 @@ const UploadPage = () => {
         </Card>
       )}
 
-      {!isCreatingAudit && auditId && (
+      {!isCreatingAudit && (
         <>
           <Card className="border-slate-200 bg-white">
             <CardHeader>
@@ -191,6 +196,7 @@ const UploadPage = () => {
               <CardContent>
                 <FileUploader
                   auditId={auditId}
+                  onEnsureAudit={ensureAudit}
                   fileType="usage_logs"
                   onUploadComplete={() => setUsageUploaded(true)}
                 />
@@ -206,6 +212,7 @@ const UploadPage = () => {
               <CardContent>
                 <FileUploader
                   auditId={auditId}
+                  onEnsureAudit={ensureAudit}
                   fileType="stripe_export"
                   onUploadComplete={() => setStripeUploaded(true)}
                 />

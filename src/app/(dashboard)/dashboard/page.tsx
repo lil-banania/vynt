@@ -94,7 +94,12 @@ const DashboardPage = async ({ searchParams }: DashboardPageProps) => {
     redirect("/login");
   }
 
-  const isAdmin = profile.role === "vynt_admin";
+  const metadataRole =
+    (user.app_metadata as { role?: string } | undefined)?.role ??
+    (user.user_metadata as { role?: string } | undefined)?.role ??
+    null;
+  const isAdmin =
+    profile.role === "vynt_admin" || metadataRole === "vynt_admin";
   const selectedOrg = searchParams?.org ?? "all";
 
   const organizationsQuery = isAdmin

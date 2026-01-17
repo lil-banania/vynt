@@ -6,11 +6,10 @@ import {
   Upload,
   Settings,
   LogOut,
+  Shield,
 } from "lucide-react";
 
-import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { Profile } from "@/lib/types/database";
 import { Button } from "@/components/ui/button";
 
 type DashboardLayoutProps = {
@@ -27,18 +26,16 @@ const DashboardLayout = async ({ children }: DashboardLayoutProps) => {
     redirect("/login");
   }
 
-  const adminSupabase = createAdminClient();
-  const { data: profile } = await (adminSupabase ?? supabase)
+  const { data: profile } = await supabase
     .from("profiles")
     .select("id, role")
     .eq("id", user.id)
-    .single<Profile>();
+    .maybeSingle();
 
   const userLabel =
     user.user_metadata?.full_name || user.email || "User";
 
   const isAdmin = profile?.role === "vynt_admin";
-  const hasProfile = Boolean(profile);
 
   const signOut = async () => {
     "use server";
@@ -73,7 +70,7 @@ const DashboardLayout = async ({ children }: DashboardLayoutProps) => {
               href="/admin"
               className="flex items-center gap-3 rounded-md px-3 py-2 text-slate-700 transition hover:bg-slate-100"
             >
-              <Settings className="h-4 w-4" />
+              <Shield className="h-4 w-4" />
               Admin
             </Link>
           )}
@@ -85,17 +82,17 @@ const DashboardLayout = async ({ children }: DashboardLayoutProps) => {
             Settings
           </Link>
         </nav>
-        {!hasProfile && (
-          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-            Admin access unavailable: user profile could not be loaded.
-          </div>
-        )}
       </aside>
 
       <div className="flex flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
           <div className="text-sm text-slate-600">
             {userLabel}
+            {isAdmin && (
+              <span className="ml-2 rounded bg-slate-900 px-2 py-0.5 text-xs text-white">
+                Admin
+              </span>
+            )}
           </div>
           <form action={signOut}>
             <Button

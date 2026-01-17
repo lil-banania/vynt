@@ -36,7 +36,14 @@ const AdminPage = async () => {
     .eq("id", user.id)
     .single<Profile>();
 
-  if (!profile || profile.role !== "vynt_admin") {
+  const metadataRole =
+    (user.app_metadata as { role?: string } | undefined)?.role ??
+    (user.user_metadata as { role?: string } | undefined)?.role ??
+    null;
+  const isAdmin =
+    profile?.role === "vynt_admin" || metadataRole === "vynt_admin";
+
+  if (!isAdmin) {
     redirect("/dashboard");
   }
 
