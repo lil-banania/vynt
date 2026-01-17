@@ -101,7 +101,15 @@ const UploadPage = () => {
       const data = await response.json().catch(() => null);
 
       if (!response.ok) {
-        throw new Error(data?.error ?? "Analysis failed.");
+        // Build detailed error message
+        let errorMsg = data?.error ?? "Analysis failed.";
+        if (data?.details) {
+          errorMsg += ` Details: ${data.details}`;
+        }
+        if (data?.hint) {
+          errorMsg += ` Hint: ${data.hint}`;
+        }
+        throw new Error(errorMsg);
       }
 
       setAnalysisResult({

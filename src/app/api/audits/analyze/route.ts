@@ -777,12 +777,53 @@ export async function POST(request: Request) {
     }
   }
 
+  // Map new categories to database-compatible categories
+  // Database may only have: zombie_subscription, unbilled_usage, pricing_mismatch, duplicate_charge, other
+  const categoryMapping: Record<string, string> = {
+    zombie_subscription: "zombie_subscription",
+    unbilled_usage: "unbilled_usage",
+    pricing_mismatch: "pricing_mismatch",
+    duplicate_charge: "duplicate_charge",
+    failed_payment: "pricing_mismatch",      // Map to pricing_mismatch
+    high_refund_rate: "pricing_mismatch",    // Map to pricing_mismatch
+    dispute_chargeback: "duplicate_charge",  // Map to duplicate_charge
+    trial_abuse: "other",                    // Map to other
+    revenue_leakage: "unbilled_usage",       // Map to unbilled_usage
+    involuntary_churn: "other",              // Map to other
+    other: "other",
+  };
+
   // Insert anomalies
   if (anomalies.length > 0) {
-    const { error: insertError } = await adminSupabase.from("anomalies").insert(anomalies);
+    // Ensure metadata is properly serialized and categories are mapped
+    const sanitizedAnomalies = anomalies.map(a => ({
+      audit_id: a.audit_id,
+      category: categoryMapping[a.category] || "other",
+      customer_id: a.customer_id || null,
+      status: a.status,
+      confidence: a.confidence,
+      annual_impact: a.annual_impact,
+      monthly_impact: a.monthly_impact,
+      description: a.description || null,
+      root_cause: a.root_cause || null,
+      recommendation: a.recommendation || null,
+      detected_at: a.detected_at,
+      // Store original category in metadata for reference
+      metadata: a.metadata 
+        ? JSON.parse(JSON.stringify({ ...a.metadata, original_category: a.category })) 
+        : { original_category: a.category },
+    }));
+
+    const { error: insertError } = await adminSupabase.from("anomalies").insert(sanitizedAnomalies);
     if (insertError) {
       console.error("Failed to insert anomalies:", insertError);
-      return NextResponse.json({ error: "Failed to save anomalies." }, { status: 500 });
+      console.error("First anomaly sample:", JSON.stringify(sanitizedAnomalies[0], null, 2));
+      return NextResponse.json({ 
+        error: "Failed to save anomalies.", 
+        details: insertError.message,
+        code: insertError.code,
+        hint: insertError.hint
+      }, { status: 500 });
     }
   }
 
