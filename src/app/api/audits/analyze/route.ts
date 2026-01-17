@@ -345,7 +345,7 @@ export async function POST(request: Request) {
       anomalies.push({
         audit_id: auditId,
         category: "unbilled_usage",
-        customer_id: null,
+        customer_id: "MULTIPLE",
         status: "detected",
         confidence: "medium",
         annual_impact: totalUnreconciled / 100 * 0.05, // 5% risk of issues
@@ -398,7 +398,7 @@ export async function POST(request: Request) {
       anomalies.push({
         audit_id: auditId,
         category: "pricing_mismatch",
-        customer_id: null,
+        customer_id: "MULTIPLE",
         status: "detected",
         confidence: feeDiscrepancies.length > 5 ? "high" : "medium",
         annual_impact: totalFeeDiscrepancy / 100 * 12,
@@ -494,7 +494,7 @@ export async function POST(request: Request) {
         anomalies.push({
           audit_id: auditId,
           category: "high_refund_rate",
-          customer_id: null,
+          customer_id: "MULTIPLE",
           status: "detected",
           confidence: "high",
           annual_impact: totalUnmatched / 100,
@@ -534,7 +534,7 @@ export async function POST(request: Request) {
       anomalies.push({
         audit_id: auditId,
         category: "other",
-        customer_id: null,
+        customer_id: "PAYOUT",
         status: "detected",
         confidence: "low",
         annual_impact: 0,
@@ -569,7 +569,7 @@ export async function POST(request: Request) {
       anomalies.push({
         audit_id: auditId,
         category: "revenue_leakage",
-        customer_id: null,
+        customer_id: "SUMMARY",
         status: "detected",
         confidence: grossDiff > 10000 ? "high" : "medium",
         annual_impact: grossDiff / 100 * 12,
@@ -796,10 +796,11 @@ export async function POST(request: Request) {
   // Insert anomalies
   if (anomalies.length > 0) {
     // Ensure metadata is properly serialized and categories are mapped
+    // Note: customer_id must not be null in the database
     const sanitizedAnomalies = anomalies.map(a => ({
       audit_id: a.audit_id,
       category: categoryMapping[a.category] || "other",
-      customer_id: a.customer_id || null,
+      customer_id: a.customer_id || "SYSTEM", // Use "SYSTEM" for aggregate/summary anomalies
       status: a.status,
       confidence: a.confidence,
       annual_impact: a.annual_impact,
