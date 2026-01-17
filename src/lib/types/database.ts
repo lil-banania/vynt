@@ -34,6 +34,7 @@ export type Organization = {
   name: string;
   created_at: string;
   updated_at: string;
+  reconciliation_config?: Record<string, unknown> | null;
 };
 
 export type Profile = {

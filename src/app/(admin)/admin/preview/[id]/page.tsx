@@ -27,6 +27,11 @@ type Organization = {
   name: string;
 };
 
+const getMetaString = (metadata: Record<string, unknown> | null, key: string) => {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+};
+
 const formatCurrency = (value: number | null) => {
   if (value === null) return "$0";
   return value.toLocaleString("en-US", {
@@ -149,6 +154,20 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
   }
 
   const estimatedRecovery = (audit.annual_revenue_at_risk ?? 0) * 0.85;
+
+  const rootCauseRollup = Object.values(
+    anomalies.reduce((acc, anomaly) => {
+      const key = anomaly.root_cause?.trim() || "Unspecified";
+      if (!acc[key]) {
+        acc[key] = { label: key, count: 0, impact: 0 };
+      }
+      acc[key].count += 1;
+      acc[key].impact += anomaly.annual_impact ?? 0;
+      return acc;
+    }, {} as Record<string, { label: string; count: number; impact: number }>)
+  )
+    .sort((a, b) => b.impact - a.impact)
+    .slice(0, 5);
 
   return (
     <div className="space-y-6">
@@ -306,6 +325,9 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
                   const catConfig = categoryConfig[anomaly.category] ?? categoryConfig.other;
                   const confConfig = confidenceConfig[anomaly.confidence];
                   const Icon = catConfig.icon;
+                  const confidenceReason = getMetaString(anomaly.metadata, "confidence_reason");
+                  const impactType = getMetaString(anomaly.metadata, "impact_type");
+                  const detectionMethod = getMetaString(anomaly.metadata, "detection_method");
                   
                   return (
                     <div key={anomaly.id} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
@@ -341,6 +363,32 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
                           <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Status</h4>
                           <p className="text-slate-700">{anomaly.description}</p>
                         </div>
+
+                        {(confidenceReason || impactType || detectionMethod) && (
+                          <div>
+                            <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Evidence</h4>
+                            <div className="space-y-1 text-sm text-slate-700">
+                              {confidenceReason && (
+                                <p>
+                                  <span className="font-semibold text-slate-800">Confidence:</span>{" "}
+                                  {confidenceReason}
+                                </p>
+                              )}
+                              {impactType && (
+                                <p>
+                                  <span className="font-semibold text-slate-800">Impact Type:</span>{" "}
+                                  {impactType}
+                                </p>
+                              )}
+                              {detectionMethod && (
+                                <p>
+                                  <span className="font-semibold text-slate-800">Detection:</span>{" "}
+                                  {detectionMethod}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
                         
                         {anomaly.monthly_impact && (
                           <div className="flex gap-8">
@@ -377,6 +425,47 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
               {anomalies.length > 5 && (
                 <p className="text-center text-sm text-slate-500 mt-4">
                   + {anomalies.length - 5} additional anomalies detected
+                </p>
+              )}
+            </section>
+          )}
+
+          {rootCauseRollup.length > 0 && (
+            <section className="mb-10">
+              <h2 className="text-xl font-bold text-slate-900 mb-6">Root Cause Rollup</h2>
+              <div className="overflow-hidden rounded-xl border border-slate-200">
+                <table className="w-full">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200">
+                      <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
+                        Root Cause
+                      </th>
+                      <th className="px-6 py-3 text-center text-xs font-semibold uppercase tracking-wider text-slate-600">
+                        Count
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-600">
+                        Annual Impact
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {rootCauseRollup.map((cause) => (
+                      <tr key={cause.label} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-6 py-4 text-sm text-slate-700">{cause.label}</td>
+                        <td className="px-6 py-4 text-center text-sm font-semibold text-slate-700">
+                          {cause.count}
+                        </td>
+                        <td className="px-6 py-4 text-right text-sm font-semibold text-slate-900">
+                          {formatCurrency(cause.impact)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {rootCauseRollup.length < anomalies.length && (
+                <p className="text-sm text-slate-500 mt-3">
+                  Showing top {rootCauseRollup.length} root causes by annual impact.
                 </p>
               )}
             </section>

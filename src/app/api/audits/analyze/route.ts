@@ -108,8 +108,68 @@ function parseDate(value: string | undefined): Date | null {
   return isNaN(date.getTime()) ? null : date;
 }
 
-function formatCurrency(cents: number): string {
-  return `€${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const DEFAULT_CURRENCY = "EUR";
+
+function formatCurrency(cents: number, currencyCode: string = DEFAULT_CURRENCY): string {
+  const normalized = (currencyCode || DEFAULT_CURRENCY).toUpperCase();
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: normalized,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(cents / 100);
+  } catch {
+    return `€${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+}
+
+type ReconciliationConfig = {
+  payoutGraceDays: number;
+  unreconciledRiskPct: number;
+  feeDiscrepancyThresholdCents: number;
+  timingMismatchDays: number;
+  payoutGroupMinTransactions: number;
+  grossDiffThresholdCents: number;
+  annualizationMonths: number;
+  chargebackFeeAmount: number;
+  currencyCode?: string;
+};
+
+const DEFAULT_CONFIG: ReconciliationConfig = {
+  payoutGraceDays: 4,
+  unreconciledRiskPct: 0.05,
+  feeDiscrepancyThresholdCents: 100,
+  timingMismatchDays: 1,
+  payoutGroupMinTransactions: 3,
+  grossDiffThresholdCents: 100,
+  annualizationMonths: 12,
+  chargebackFeeAmount: 15,
+  currencyCode: undefined,
+};
+
+function resolveConfig(input: Partial<ReconciliationConfig> | null | undefined): ReconciliationConfig {
+  return {
+    payoutGraceDays: Number.isFinite(input?.payoutGraceDays) ? Math.max(0, Number(input?.payoutGraceDays)) : DEFAULT_CONFIG.payoutGraceDays,
+    unreconciledRiskPct: Number.isFinite(input?.unreconciledRiskPct) ? Math.max(0, Number(input?.unreconciledRiskPct)) : DEFAULT_CONFIG.unreconciledRiskPct,
+    feeDiscrepancyThresholdCents: Number.isFinite(input?.feeDiscrepancyThresholdCents)
+      ? Math.max(0, Number(input?.feeDiscrepancyThresholdCents))
+      : DEFAULT_CONFIG.feeDiscrepancyThresholdCents,
+    timingMismatchDays: Number.isFinite(input?.timingMismatchDays) ? Math.max(0, Number(input?.timingMismatchDays)) : DEFAULT_CONFIG.timingMismatchDays,
+    payoutGroupMinTransactions: Number.isFinite(input?.payoutGroupMinTransactions)
+      ? Math.max(1, Number(input?.payoutGroupMinTransactions))
+      : DEFAULT_CONFIG.payoutGroupMinTransactions,
+    grossDiffThresholdCents: Number.isFinite(input?.grossDiffThresholdCents)
+      ? Math.max(0, Number(input?.grossDiffThresholdCents))
+      : DEFAULT_CONFIG.grossDiffThresholdCents,
+    annualizationMonths: Number.isFinite(input?.annualizationMonths)
+      ? Math.max(1, Number(input?.annualizationMonths))
+      : DEFAULT_CONFIG.annualizationMonths,
+    chargebackFeeAmount: Number.isFinite(input?.chargebackFeeAmount)
+      ? Math.max(0, Number(input?.chargebackFeeAmount))
+      : DEFAULT_CONFIG.chargebackFeeAmount,
+    currencyCode: typeof input?.currencyCode === "string" && input.currencyCode.trim() ? input.currencyCode.trim().toUpperCase() : undefined,
+  };
 }
 
 // ============================================================================
@@ -143,6 +203,36 @@ export async function POST(request: Request) {
 
   const adminSupabase = createAdminClient(supabaseUrl, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
+  });
+
+  const { data: auditMeta, error: auditMetaError } = await adminSupabase
+    .from("audits")
+    .select("id, organization_id")
+    .eq("id", auditId)
+    .maybeSingle();
+
+  if (auditMetaError || !auditMeta) {
+    return NextResponse.json({ error: "Audit not found." }, { status: 404 });
+  }
+
+  const { data: organization } = await adminSupabase
+    .from("organizations")
+    .select("*")
+    .eq("id", auditMeta.organization_id)
+    .maybeSingle();
+
+  const orgConfigRaw =
+    organization && typeof organization.reconciliation_config === "object"
+      ? (organization.reconciliation_config as Record<string, unknown>)
+      : {};
+  const orgConfigSettings =
+    typeof orgConfigRaw.settings === "object" && orgConfigRaw.settings
+      ? (orgConfigRaw.settings as Record<string, unknown>)
+      : orgConfigRaw;
+
+  const config = resolveConfig({
+    ...(orgConfigSettings as Partial<ReconciliationConfig>),
+    ...(body?.config as Partial<ReconciliationConfig> | undefined),
   });
 
   // Get uploaded files
@@ -204,6 +294,11 @@ export async function POST(request: Request) {
 
     const dbRows = file1Result.data.map((row) => mapRow(row, dbMapping));
     const stripeRows = file2Result.data.map((row) => mapRow(row, stripeMapping));
+    const currencyCode =
+      config.currencyCode ||
+      stripeRows.find((row) => row.currency)?.currency?.toUpperCase() ||
+      dbRows.find((row) => row.currency)?.currency?.toUpperCase() ||
+      DEFAULT_CURRENCY;
 
     // Build lookup maps
     const stripeById = new Map<string, typeof stripeRows[0]>();
@@ -212,14 +307,14 @@ export async function POST(request: Request) {
     for (const row of stripeRows) {
       if (row.id) stripeById.set(row.id, row);
       
-      const key = `${row.customer}_${row.amount}`;
+      const key = `${row.customer}_${parseAmount(row.amount)}`;
       if (!stripeByCustomerAmount.has(key)) stripeByCustomerAmount.set(key, []);
       stripeByCustomerAmount.get(key)!.push(row);
     }
 
     const dbByCustomerAmount = new Map<string, typeof dbRows[0][]>();
     for (const row of dbRows) {
-      const key = `${row.customer_id}_${row.amount}`;
+      const key = `${row.customer_id}_${parseAmount(row.amount)}`;
       if (!dbByCustomerAmount.has(key)) dbByCustomerAmount.set(key, []);
       dbByCustomerAmount.get(key)!.push(row);
     }
@@ -231,13 +326,15 @@ export async function POST(request: Request) {
     // ANOMALY 1: Transactions in DB but missing from Stripe
     // ========================================================================
     for (const dbRow of dbRows) {
-      if (dbRow.status?.toLowerCase() === "failed") {
+      const status = dbRow.status?.toLowerCase();
+      if (status === "failed") {
         // Check if failed transaction is missing from Stripe
-        const stripeMatch = stripeRows.find(s => 
-          s.customer === dbRow.customer_id && 
-          parseAmount(s.amount) === parseAmount(dbRow.amount)
+        const stripeMatch = stripeRows.find(
+          (s) =>
+            s.customer === dbRow.customer_id &&
+            parseAmount(s.amount) === parseAmount(dbRow.amount)
         );
-        
+
         if (!stripeMatch) {
           const amount = parseAmount(dbRow.amount);
           anomalies.push({
@@ -246,13 +343,59 @@ export async function POST(request: Request) {
             customer_id: dbRow.customer_id || null,
             status: "detected",
             confidence: "high",
-            annual_impact: amount * 0.12, // Estimate 12 months
+            annual_impact: (amount / 100) * config.annualizationMonths,
             monthly_impact: amount / 100,
-            description: `Failed payment for ${dbRow.customer_name || dbRow.customer_id} (${formatCurrency(amount)}) is recorded in DB but completely absent from Stripe export.`,
+            description: `Failed payment for ${dbRow.customer_name || dbRow.customer_id} (${formatCurrency(amount, currencyCode)}) is recorded in DB but completely absent from Stripe export.`,
             root_cause: "Failed payments may not sync to Stripe export, or the payment attempt was not recorded in Stripe.",
             recommendation: "Review payment gateway logs. Ensure failed payment attempts are properly tracked for dunning sequences.",
             detected_at: now,
-            metadata: { db_transaction_id: dbRow.transaction_id, amount, customer: dbRow.customer_email },
+            metadata: {
+              db_transaction_id: dbRow.transaction_id,
+              amount,
+              customer: dbRow.customer_email,
+              invoice_id: dbRow.invoice_id,
+              detection_method: "db_failed_without_stripe_match",
+              confidence_reason: "No Stripe charge found with same customer and amount.",
+              impact_type: "potential",
+            },
+          });
+        }
+      }
+
+      if (status === "succeeded") {
+        const amount = parseAmount(dbRow.amount);
+        if (amount <= 0) continue;
+        const key = `${dbRow.customer_id}_${amount}`;
+        const candidates = stripeByCustomerAmount.get(key) ?? [];
+        const stripeMatch = candidates.find(
+          (row) =>
+            row.object !== "refund" &&
+            row.status?.toLowerCase() === "succeeded" &&
+            (!row.id || !matchedStripeIds.has(row.id))
+        );
+        if (stripeMatch?.id) {
+          matchedStripeIds.add(stripeMatch.id);
+        } else {
+          anomalies.push({
+            audit_id: auditId,
+            category: "pricing_mismatch",
+            customer_id: dbRow.customer_id || null,
+            status: "detected",
+            confidence: "high",
+            annual_impact: amount / 100,
+            monthly_impact: amount / 100,
+            description: `Charge for ${dbRow.customer_name || dbRow.customer_id} (${formatCurrency(amount, currencyCode)}) exists in DB but is missing from Stripe export.`,
+            root_cause: "Missing charge in Stripe export, data sync lag, or charge captured outside of Stripe.",
+            recommendation: "Verify charge in Stripe dashboard and ingestion pipeline. Backfill missing export entries.",
+            detected_at: now,
+            metadata: {
+              db_transaction_id: dbRow.transaction_id,
+              amount,
+              invoice_id: dbRow.invoice_id,
+              detection_method: "db_succeeded_without_stripe_match",
+              confidence_reason: "No Stripe succeeded charge found with same customer and amount.",
+              impact_type: "probable",
+            },
           });
         }
       }
@@ -285,11 +428,18 @@ export async function POST(request: Request) {
           confidence: "high",
           annual_impact: amount / 100, // Single occurrence, not annualized
           monthly_impact: amount / 100,
-          description: `Customer ${customer} has ${charges.length} identical charges of ${formatCurrency(amount)} on the same date. Charge IDs: ${ids}`,
+          description: `Customer ${customer} has ${charges.length} identical charges of ${formatCurrency(amount, currencyCode)} on the same date. Charge IDs: ${ids}`,
           root_cause: "Double-click on payment button, webhook retry issue, or manual billing error.",
-          recommendation: "Implement idempotency keys. Review and refund confirmed duplicates (${formatCurrency(amount)} at risk).",
+          recommendation: `Implement idempotency keys. Review and refund confirmed duplicates (${formatCurrency(amount, currencyCode)} at risk).`,
           detected_at: now,
-          metadata: { charge_ids: charges.map(c => c.id), amount, count: charges.length },
+          metadata: {
+            charge_ids: charges.map((c) => c.id),
+            amount,
+            count: charges.length,
+            detection_method: "stripe_duplicate_same_customer_amount_date",
+            confidence_reason: "Multiple Stripe charges with identical customer, amount, and date.",
+            impact_type: "probable",
+          },
         });
       }
     }
@@ -306,15 +456,16 @@ export async function POST(request: Request) {
         
         if (stripeMatch && stripeMatch.status?.toLowerCase() === "succeeded") {
           const amount = Math.abs(parseAmount(dbRow.amount));
+          if (stripeMatch.id) matchedStripeIds.add(stripeMatch.id);
           anomalies.push({
             audit_id: auditId,
             category: "dispute_chargeback",
             customer_id: dbRow.customer_id || null,
             status: "detected",
             confidence: "high",
-            annual_impact: (amount / 100) * 12 + 15, // Include chargeback fee
+            annual_impact: amount / 100 + config.chargebackFeeAmount,
             monthly_impact: amount / 100,
-            description: `Dispute for ${dbRow.customer_name || dbRow.customer_id}: DB shows "disputed" status but Stripe still shows "succeeded". Amount: ${formatCurrency(amount)}`,
+            description: `Dispute for ${dbRow.customer_name || dbRow.customer_id}: DB shows "disputed" status but Stripe still shows "succeeded". Amount: ${formatCurrency(amount, currencyCode)}`,
             root_cause: "Status sync delay between Stripe and internal DB, or dispute opened but not yet reflected in charge status.",
             recommendation: "Verify dispute status in Stripe dashboard. Update internal records. Prepare dispute evidence if needed.",
             detected_at: now,
@@ -322,7 +473,10 @@ export async function POST(request: Request) {
               db_status: dbRow.status, 
               stripe_status: stripeMatch.status, 
               stripe_disputed: stripeMatch.disputed,
-              amount 
+              amount,
+              detection_method: "db_disputed_vs_stripe_succeeded",
+              confidence_reason: "DB dispute with Stripe succeeded charge match.",
+              impact_type: "probable",
             },
           });
         }
@@ -330,13 +484,68 @@ export async function POST(request: Request) {
     }
 
     // ========================================================================
+    // ANOMALY 3B: Stripe charges missing from DB
+    // ========================================================================
+    const stripeSucceededCharges = stripeRows.filter(
+      (row) => row.object !== "refund" && row.status?.toLowerCase() === "succeeded"
+    );
+    const unmatchedStripeCharges = stripeSucceededCharges.filter((row) => {
+      const amount = parseAmount(row.amount);
+      const key = `${row.customer}_${amount}`;
+      if (row.id && matchedStripeIds.has(row.id)) return false;
+      if (dbByCustomerAmount.has(key)) return false;
+      return true;
+    });
+
+    if (unmatchedStripeCharges.length > 0) {
+      const totalUnmatched = unmatchedStripeCharges.reduce(
+        (sum, row) => sum + parseAmount(row.amount),
+        0
+      );
+      const customers = [...new Set(unmatchedStripeCharges.map((row) => row.customer))].slice(0, 5);
+      anomalies.push({
+        audit_id: auditId,
+        category: "pricing_mismatch",
+        customer_id: "MULTIPLE",
+        status: "detected",
+        confidence: "high",
+        annual_impact: totalUnmatched / 100,
+        monthly_impact: totalUnmatched / 100,
+        description: `${unmatchedStripeCharges.length} Stripe charge(s) totaling ${formatCurrency(totalUnmatched, currencyCode)} have no matching DB transaction. Sample customers: ${customers.join(", ")}...`,
+        root_cause: "Missing internal ledger entries or delayed ingestion of Stripe charges.",
+        recommendation: "Backfill missing DB records from Stripe and monitor ingestion latency.",
+        detected_at: now,
+        metadata: {
+          count: unmatchedStripeCharges.length,
+          total_amount: totalUnmatched,
+          sample_charge_ids: unmatchedStripeCharges.map((row) => row.id).slice(0, 5),
+          detection_method: "stripe_charge_without_db_match",
+          confidence_reason: "No DB transaction found with same customer and amount.",
+          impact_type: "probable",
+        },
+      });
+    }
+
+    // ========================================================================
     // ANOMALY 4: Unreconciled transactions (missing payout_id)
     // ========================================================================
-    const unreconciledCharges = stripeRows.filter(row => 
-      row.object !== "refund" && 
-      row.status?.toLowerCase() === "succeeded" &&
-      (!row.payout_id || row.payout_id.trim() === "")
-    );
+    const payoutGraceDays = config.payoutGraceDays;
+    const latestStripeDate = stripeRows
+      .map((row) => parseDate(row.created))
+      .filter((value): value is Date => Boolean(value))
+      .sort((a, b) => b.getTime() - a.getTime())[0];
+    const payoutCutoff = latestStripeDate
+      ? new Date(latestStripeDate.getTime() - payoutGraceDays * 24 * 60 * 60 * 1000)
+      : null;
+
+    const unreconciledCharges = stripeRows.filter((row) => {
+      if (row.object === "refund") return false;
+      if (row.status?.toLowerCase() !== "succeeded") return false;
+      if (row.payout_id && row.payout_id.trim() !== "") return false;
+      if (!payoutCutoff) return true;
+      const createdAt = parseDate(row.created);
+      return !createdAt || createdAt <= payoutCutoff;
+    });
 
     if (unreconciledCharges.length > 0) {
       const totalUnreconciled = unreconciledCharges.reduce((sum, c) => sum + parseAmount(c.amount), 0);
@@ -348,16 +557,21 @@ export async function POST(request: Request) {
         customer_id: "MULTIPLE",
         status: "detected",
         confidence: "medium",
-        annual_impact: totalUnreconciled / 100 * 0.05, // 5% risk of issues
-        monthly_impact: totalUnreconciled / 100 / 12,
-        description: `${unreconciledCharges.length} transaction(s) totaling ${formatCurrency(totalUnreconciled)} are pending payout (no payout_id). Affected customers: ${customers.join(", ")}...`,
+        annual_impact: (totalUnreconciled / 100) * config.unreconciledRiskPct,
+        monthly_impact: ((totalUnreconciled / 100) * config.unreconciledRiskPct) / 12,
+        description: `${unreconciledCharges.length} transaction(s) totaling ${formatCurrency(totalUnreconciled, currencyCode)} are pending payout (no payout_id) beyond a ${payoutGraceDays}-day grace period. Affected customers: ${customers.join(", ")}...`,
         root_cause: "Transactions are in processing queue, payout schedule delay, or bank transfer pending.",
         recommendation: "Review Stripe payout schedule. Verify bank account is properly connected. Check for any holds on the account.",
         detected_at: now,
         metadata: { 
           count: unreconciledCharges.length, 
           total_amount: totalUnreconciled,
-          transaction_ids: unreconciledCharges.map(c => c.id).slice(0, 10)
+          transaction_ids: unreconciledCharges.map(c => c.id).slice(0, 10),
+          payout_grace_days: payoutGraceDays,
+          payout_cutoff: payoutCutoff?.toISOString() ?? null,
+          detection_method: "stripe_succeeded_without_payout_id",
+          confidence_reason: "Stripe charge succeeded but payout_id missing beyond grace period.",
+          impact_type: "potential",
         },
       });
     }
@@ -394,23 +608,26 @@ export async function POST(request: Request) {
       }
     }
 
-    if (totalFeeDiscrepancy > 100) { // More than €1 in fee discrepancies
+    if (totalFeeDiscrepancy > config.feeDiscrepancyThresholdCents) {
       anomalies.push({
         audit_id: auditId,
         category: "pricing_mismatch",
         customer_id: "MULTIPLE",
         status: "detected",
         confidence: feeDiscrepancies.length > 5 ? "high" : "medium",
-        annual_impact: totalFeeDiscrepancy / 100 * 12,
+        annual_impact: totalFeeDiscrepancy / 100,
         monthly_impact: totalFeeDiscrepancy / 100,
-        description: `Fee discrepancy detected across ${feeDiscrepancies.length} transaction(s). Total difference: ${formatCurrency(totalFeeDiscrepancy)}. DB fees don't match Stripe fees.`,
+        description: `Fee discrepancy detected across ${feeDiscrepancies.length} transaction(s). Total difference: ${formatCurrency(totalFeeDiscrepancy, currencyCode)}. DB fees don't match Stripe fees.`,
         root_cause: "Rounding differences, different fee calculation methods, or outdated fee rates in internal system.",
         recommendation: "Audit fee calculation logic. Sync fee rates with current Stripe pricing. Consider using Stripe fees as source of truth.",
         detected_at: now,
         metadata: { 
           total_discrepancy: totalFeeDiscrepancy,
           transaction_count: feeDiscrepancies.length,
-          samples: feeDiscrepancies.slice(0, 5)
+          samples: feeDiscrepancies.slice(0, 5),
+          detection_method: "db_fee_vs_stripe_fee",
+          confidence_reason: "Same customer+amount with different fee values.",
+          impact_type: "probable",
         },
       });
     }
@@ -433,7 +650,7 @@ export async function POST(request: Request) {
           const diffMs = Math.abs(dbDate.getTime() - stripeDate.getTime());
           const diffDays = diffMs / (1000 * 60 * 60 * 24);
           
-          if (diffDays > 1) {
+          if (diffDays > config.timingMismatchDays) {
             const amount = parseAmount(dbRow.amount);
             anomalies.push({
               audit_id: auditId,
@@ -443,7 +660,7 @@ export async function POST(request: Request) {
               confidence: diffDays > 3 ? "high" : "medium",
               annual_impact: 0, // No direct financial impact
               monthly_impact: 0,
-              description: `Timing mismatch for ${dbRow.customer_name || dbRow.customer_id}: DB shows ${dbDate.toISOString().split("T")[0]}, Stripe shows ${stripeDate.toISOString().split("T")[0]} (${Math.round(diffDays)} days difference). Amount: ${formatCurrency(amount)}`,
+              description: `Timing mismatch for ${dbRow.customer_name || dbRow.customer_id}: DB shows ${dbDate.toISOString().split("T")[0]}, Stripe shows ${stripeDate.toISOString().split("T")[0]} (${Math.round(diffDays)} days difference). Amount: ${formatCurrency(amount, currencyCode)}`,
               root_cause: "Timezone differences, processing delays, or manual entry discrepancies.",
               recommendation: "Standardize timestamp handling. Use Stripe created_at as source of truth for reporting.",
               detected_at: now,
@@ -451,7 +668,10 @@ export async function POST(request: Request) {
                 db_date: dbDate.toISOString(), 
                 stripe_date: stripeDate.toISOString(),
                 diff_days: diffDays,
-                amount
+                amount,
+                detection_method: "db_created_vs_stripe_created_date_diff",
+                confidence_reason: "Dates differ beyond configured threshold.",
+                impact_type: "informational",
               },
             });
           }
@@ -467,25 +687,39 @@ export async function POST(request: Request) {
       parseAmount(r.amount) < 0
     );
     
-    const stripeRefundObjects = stripeRows.filter(r => r.object === "refund");
-    const stripeChargesWithRefund = stripeRows.filter(r => parseAmount(r.amount_refunded) > 0);
+    const stripeRefundObjects = stripeRows.filter((r) => r.object === "refund");
+    const stripeCharges = stripeRows.filter((r) => r.object !== "refund");
 
     if (dbRefunds.length > 0) {
       const unmatchedRefunds: typeof dbRows = [];
+      const mismatchedRefunds: typeof dbRows = [];
       
       for (const dbRefund of dbRefunds) {
         const amount = Math.abs(parseAmount(dbRefund.amount));
         
-        // Check if there's a matching refund object or amount_refunded in Stripe
-        const hasStripeRefundObject = stripeRefundObjects.some(r => 
-          parseAmount(r.amount) === amount
-        );
-        const hasAmountRefunded = stripeChargesWithRefund.some(r => 
-          parseAmount(r.amount_refunded) === amount
-        );
+        const hasStripeRefundObject = stripeRefundObjects.some((r) => {
+          if (dbRefund.invoice_id && r.invoice) {
+            return r.invoice === dbRefund.invoice_id;
+          }
+          if (dbRefund.customer_id && r.customer) {
+            return r.customer === dbRefund.customer_id && parseAmount(r.amount) === amount;
+          }
+          return parseAmount(r.amount) === amount;
+        });
+        const hasAmountRefunded = stripeCharges.some((r) => {
+          if (dbRefund.invoice_id && r.invoice) {
+            return r.invoice === dbRefund.invoice_id && parseAmount(r.amount_refunded) >= amount;
+          }
+          if (dbRefund.customer_id && r.customer) {
+            return r.customer === dbRefund.customer_id && parseAmount(r.amount_refunded) >= amount;
+          }
+          return parseAmount(r.amount_refunded) >= amount;
+        });
         
         if (!hasStripeRefundObject && !hasAmountRefunded) {
           unmatchedRefunds.push(dbRefund);
+        } else if (hasStripeRefundObject && !hasAmountRefunded) {
+          mismatchedRefunds.push(dbRefund);
         }
       }
 
@@ -499,14 +733,42 @@ export async function POST(request: Request) {
           confidence: "high",
           annual_impact: totalUnmatched / 100,
           monthly_impact: totalUnmatched / 100 / 12,
-          description: `${unmatchedRefunds.length} refund(s) in DB totaling ${formatCurrency(totalUnmatched)} cannot be matched to Stripe refund records.`,
+          description: `${unmatchedRefunds.length} refund(s) in DB totaling ${formatCurrency(totalUnmatched, currencyCode)} cannot be matched to Stripe refund records.`,
           root_cause: "Different refund recording methods between DB and Stripe (inline amount_refunded vs separate refund object).",
           recommendation: "Standardize refund tracking. Cross-reference with Stripe refund events. Verify all refunds are properly processed.",
           detected_at: now,
           metadata: { 
             unmatched_count: unmatchedRefunds.length,
             total_amount: totalUnmatched,
-            db_refunds: unmatchedRefunds.map(r => r.transaction_id).slice(0, 5)
+            db_refunds: unmatchedRefunds.map(r => r.transaction_id).slice(0, 5),
+            detection_method: "db_refund_without_stripe_refund",
+            confidence_reason: "No refund object or amount_refunded match in Stripe.",
+            impact_type: "probable",
+          },
+        });
+      }
+
+      if (mismatchedRefunds.length > 0) {
+        const totalMismatched = mismatchedRefunds.reduce((sum, r) => sum + Math.abs(parseAmount(r.amount)), 0);
+        anomalies.push({
+          audit_id: auditId,
+          category: "high_refund_rate",
+          customer_id: "MULTIPLE",
+          status: "detected",
+          confidence: "medium",
+          annual_impact: totalMismatched / 100,
+          monthly_impact: totalMismatched / 100 / 12,
+          description: `${mismatchedRefunds.length} refund(s) in DB totaling ${formatCurrency(totalMismatched, currencyCode)} have refund objects in Stripe, but charge.amount_refunded is not updated.`,
+          root_cause: "Stripe refund objects recorded separately without updating amount_refunded on the charge.",
+          recommendation: "Normalize refund tracking: reconcile refund objects to charges and ensure amount_refunded is updated or ignored consistently.",
+          detected_at: now,
+          metadata: {
+            mismatched_count: mismatchedRefunds.length,
+            total_amount: totalMismatched,
+            db_refunds: mismatchedRefunds.map((r) => r.transaction_id).slice(0, 5),
+            detection_method: "stripe_refund_object_without_amount_refunded",
+            confidence_reason: "Refund object exists but charge.amount_refunded is zero.",
+            impact_type: "informational",
           },
         });
       }
@@ -524,7 +786,7 @@ export async function POST(request: Request) {
     }
 
     const largePayouts = [...payoutGroups.entries()]
-      .filter(([_, txns]) => txns.length >= 3)
+      .filter(([_, txns]) => txns.length >= config.payoutGroupMinTransactions)
       .sort((a, b) => b[1].length - a[1].length);
 
     if (largePayouts.length > 0) {
@@ -539,7 +801,7 @@ export async function POST(request: Request) {
         confidence: "low",
         annual_impact: 0,
         monthly_impact: 0,
-        description: `Grouped payout detected: ${payoutId} bundles ${transactions.length} transactions totaling ${formatCurrency(totalAmount)}. Individual transaction matching may be complex.`,
+        description: `Grouped payout detected: ${payoutId} bundles ${transactions.length} transactions totaling ${formatCurrency(totalAmount, currencyCode)}. Individual transaction matching may be complex.`,
         root_cause: "Stripe batches multiple transactions into single bank transfers based on payout schedule.",
         recommendation: "For accurate reconciliation, match individual transactions first, then verify payout totals against bank statements.",
         detected_at: now,
@@ -565,23 +827,26 @@ export async function POST(request: Request) {
 
     const grossDiff = Math.abs(dbTotalGross - stripeTotalGross);
     
-    if (grossDiff > 100) { // More than €1 difference
+    if (grossDiff > config.grossDiffThresholdCents) {
       anomalies.push({
         audit_id: auditId,
         category: "revenue_leakage",
         customer_id: "SUMMARY",
         status: "detected",
         confidence: grossDiff > 10000 ? "high" : "medium",
-        annual_impact: grossDiff / 100 * 12,
+        annual_impact: grossDiff / 100,
         monthly_impact: grossDiff / 100,
-        description: `Gross revenue discrepancy: DB shows ${formatCurrency(dbTotalGross)}, Stripe shows ${formatCurrency(stripeTotalGross)}. Difference: ${formatCurrency(grossDiff)}`,
+        description: `Gross revenue discrepancy: DB shows ${formatCurrency(dbTotalGross, currencyCode)}, Stripe shows ${formatCurrency(stripeTotalGross, currencyCode)}. Difference: ${formatCurrency(grossDiff, currencyCode)}`,
         root_cause: "Duplicate transactions in Stripe, missing transactions in DB, or timing differences.",
         recommendation: "Perform line-by-line reconciliation. Identify and resolve individual transaction discrepancies.",
         detected_at: now,
         metadata: { 
           db_gross: dbTotalGross,
           stripe_gross: stripeTotalGross,
-          difference: grossDiff
+          difference: grossDiff,
+          detection_method: "summary_gross_total_diff",
+          confidence_reason: "Aggregated gross totals differ beyond configured threshold.",
+          impact_type: "probable",
         },
       });
     }
@@ -792,7 +1057,7 @@ export async function POST(request: Request) {
     // Extended categories mapped to closest match
     failed_payment: "pricing_mismatch",       // Payment issues → pricing
     high_refund_rate: "pricing_mismatch",     // Refund issues → pricing
-    dispute_chargeback: "duplicate_charge",   // Disputes → duplicate/charge issues
+    dispute_chargeback: "pricing_mismatch",   // Disputes → pricing/payment issues
     trial_abuse: "unbilled_usage",            // Trial abuse → unbilled
     revenue_leakage: "unbilled_usage",        // Revenue leakage → unbilled
     involuntary_churn: "zombie_subscription", // Churn risk → zombie

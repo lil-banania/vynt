@@ -285,6 +285,31 @@ const AnomalyTable = ({ anomalies, onFilterChange }: AnomalyTableProps) => {
                             {selectedAnomaly?.recommendation ?? "N/A"}
                           </p>
                         </div>
+                        <div>
+                          <div className="text-xs font-semibold uppercase text-slate-500">
+                            Evidence
+                          </div>
+                          <div className="mt-1 space-y-1 text-slate-700">
+                            <p>
+                              <span className="font-semibold">Confidence:</span>{" "}
+                              {typeof selectedAnomaly?.metadata?.confidence_reason === "string"
+                                ? selectedAnomaly.metadata.confidence_reason
+                                : "N/A"}
+                            </p>
+                            <p>
+                              <span className="font-semibold">Impact Type:</span>{" "}
+                              {typeof selectedAnomaly?.metadata?.impact_type === "string"
+                                ? selectedAnomaly.metadata.impact_type
+                                : "N/A"}
+                            </p>
+                            <p>
+                              <span className="font-semibold">Detection:</span>{" "}
+                              {typeof selectedAnomaly?.metadata?.detection_method === "string"
+                                ? selectedAnomaly.metadata.detection_method
+                                : "N/A"}
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     </DialogContent>
                   </Dialog>
