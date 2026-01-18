@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import FileUploader from "@/components/upload/FileUploader";
@@ -15,7 +15,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { createClient } from "@/lib/supabase/client";
 
 type UploadStep = "usage" | "stripe" | "review";
 
@@ -29,7 +28,6 @@ type AnalysisStatus = "idle" | "processing" | "review" | "error";
 
 const UploadPage = () => {
   const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
   const [auditId, setAuditId] = useState<string | null>(null);
   const [isCreatingAudit, setIsCreatingAudit] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -141,54 +139,60 @@ const UploadPage = () => {
 
       const pollAuditStatus = async () => {
         if (!auditId) return;
-        const { data: audit, error } = await supabase
-          .from("audits")
-          .select(
-            "status, total_anomalies, annual_revenue_at_risk, error_message, ai_insights"
-          )
-          .eq("id", auditId)
-          .maybeSingle();
-
-        if (error || !audit) {
-          setAnalysisStatus("error");
-          setErrorMessage(error?.message ?? "Unable to fetch audit status.");
-          setIsSubmitting(false);
-          return;
-        }
-
-        if (audit.status === "review") {
-          setAnalysisResult({
-            anomaliesDetected: audit.total_anomalies ?? 0,
-            annualRevenueAtRisk: audit.annual_revenue_at_risk ?? 0,
-            aiInsights: audit.ai_insights ?? null,
+        try {
+          const pollResponse = await fetch("/api/audits/poll", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ auditId }),
           });
-          setIsSubmitted(true);
-          setAnalysisStatus("review");
-          setIsSubmitting(false);
-          if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = null;
-          }
-          if (pollingTimeoutRef.current) {
-            clearTimeout(pollingTimeoutRef.current);
-            pollingTimeoutRef.current = null;
-          }
-          return;
-        }
 
-        if (audit.status === "error") {
+          const pollData = await pollResponse.json().catch(() => null);
+
+          if (!pollResponse.ok || !pollData) {
+            setAnalysisStatus("error");
+            setErrorMessage(pollData?.error ?? "Unable to fetch audit status.");
+            setIsSubmitting(false);
+            return;
+          }
+
+          if (pollData.status === "review") {
+            setAnalysisResult({
+              anomaliesDetected: pollData.totalAnomalies ?? 0,
+              annualRevenueAtRisk: pollData.annualRevenueAtRisk ?? 0,
+              aiInsights: pollData.aiInsights ?? null,
+            });
+            setIsSubmitted(true);
+            setAnalysisStatus("review");
+            setIsSubmitting(false);
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            if (pollingTimeoutRef.current) {
+              clearTimeout(pollingTimeoutRef.current);
+              pollingTimeoutRef.current = null;
+            }
+            return;
+          }
+
+          if (pollData.status === "error") {
+            setAnalysisStatus("error");
+            setErrorMessage(pollData.errorMessage ?? "Analysis failed.");
+            setIsSubmitting(false);
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            if (pollingTimeoutRef.current) {
+              clearTimeout(pollingTimeoutRef.current);
+              pollingTimeoutRef.current = null;
+            }
+            return;
+          }
+        } catch {
           setAnalysisStatus("error");
-          setErrorMessage(audit.error_message ?? "Analysis failed.");
+          setErrorMessage("Unable to fetch audit status.");
           setIsSubmitting(false);
-          if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = null;
-          }
-          if (pollingTimeoutRef.current) {
-            clearTimeout(pollingTimeoutRef.current);
-            pollingTimeoutRef.current = null;
-          }
-          return;
         }
       };
 
