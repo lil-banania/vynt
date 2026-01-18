@@ -239,13 +239,15 @@ serve(async (req) => {
       .maybeSingle();
 
     const orgConfigRaw =
-      organization && typeof organization.reconciliation_config === "object"
+      organization && 
+      organization.reconciliation_config !== null && 
+      typeof organization.reconciliation_config === "object"
         ? (organization.reconciliation_config as Record<string, unknown>)
         : {};
     const orgConfigSettings =
-      typeof orgConfigRaw.settings === "object" && orgConfigRaw.settings
+      orgConfigRaw && typeof orgConfigRaw.settings === "object" && orgConfigRaw.settings !== null
         ? (orgConfigRaw.settings as Record<string, unknown>)
-        : orgConfigRaw;
+        : orgConfigRaw ?? {};
 
     const resolvedConfig = resolveConfig({
       ...(orgConfigSettings as Partial<ReconciliationConfig>),
