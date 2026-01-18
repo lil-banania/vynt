@@ -176,7 +176,10 @@ function jsonResponse(payload: Record<string, unknown>, status = 200) {
 }
 
 serve(async (req) => {
+  console.log("[analyze-audit] Function invoked");
+  
   if (req.method !== "POST") {
+    console.log("[analyze-audit] Method not allowed:", req.method);
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
@@ -187,19 +190,26 @@ serve(async (req) => {
     const body = await req.json();
     auditId = typeof body?.auditId === "string" ? body.auditId : null;
     config = body?.config as Partial<ReconciliationConfig> | undefined;
-  } catch {
+    console.log("[analyze-audit] Received auditId:", auditId);
+  } catch (e) {
+    console.error("[analyze-audit] Failed to parse JSON:", e);
     return jsonResponse({ error: "Invalid JSON body." }, 400);
   }
 
   if (!auditId) {
+    console.log("[analyze-audit] Missing auditId");
     return jsonResponse({ error: "Audit ID is required." }, 400);
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? Deno.env.get("NEXT_PUBLIC_SUPABASE_URL") ?? "";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
+  console.log("[analyze-audit] SUPABASE_URL exists:", !!supabaseUrl);
+  console.log("[analyze-audit] SERVICE_ROLE_KEY exists:", !!serviceRoleKey);
+
   if (!supabaseUrl || !serviceRoleKey) {
-    return jsonResponse({ error: "Server configuration missing." }, 500);
+    console.error("[analyze-audit] Missing configuration - URL:", !!supabaseUrl, "Key:", !!serviceRoleKey);
+    return jsonResponse({ error: "Server configuration missing. Check SUPABASE_SERVICE_ROLE_KEY secret." }, 500);
   }
 
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
@@ -207,6 +217,7 @@ serve(async (req) => {
   });
 
   try {
+    console.log("[analyze-audit] Fetching audit metadata...");
     const { data: auditMeta, error: auditMetaError } = await supabase
       .from("audits")
       .select("id, organization_id")
@@ -214,8 +225,10 @@ serve(async (req) => {
       .maybeSingle();
 
     if (auditMetaError || !auditMeta) {
+      console.error("[analyze-audit] Audit not found:", auditMetaError);
       return jsonResponse({ error: "Audit not found." }, 404);
     }
+    console.log("[analyze-audit] Found audit for org:", auditMeta.organization_id);
 
     await supabase.from("audits").update({ status: "processing" }).eq("id", auditId);
 
@@ -239,34 +252,53 @@ serve(async (req) => {
       ...(config as Partial<ReconciliationConfig> | undefined),
     });
 
-    const { data: files } = await supabase
+    console.log("[analyze-audit] Fetching uploaded files...");
+    const { data: files, error: filesError } = await supabase
       .from("uploaded_files")
       .select("id, file_type, file_path")
       .eq("audit_id", auditId);
 
+    console.log("[analyze-audit] Files found:", files?.length, "Error:", filesError);
+
     if (!files || files.length < 2) {
-      return jsonResponse({ error: "Both files are required." }, 400);
+      console.error("[analyze-audit] Not enough files:", files?.length);
+      await supabase.from("audits").update({ status: "error", error_message: "Both files are required." }).eq("id", auditId);
+      return jsonResponse({ error: "Both files are required.", found: files?.length ?? 0 }, 400);
     }
 
     const file1 = files.find((f) => f.file_type === "usage_logs");
     const file2 = files.find((f) => f.file_type === "stripe_export");
+    console.log("[analyze-audit] Usage logs file:", file1?.file_path);
+    console.log("[analyze-audit] Stripe export file:", file2?.file_path);
 
     if (!file1 || !file2) {
-      return jsonResponse({ error: "Both files are required." }, 400);
+      console.error("[analyze-audit] Missing file type - usage_logs:", !!file1, "stripe_export:", !!file2);
+      await supabase.from("audits").update({ status: "error", error_message: "Both file types required." }).eq("id", auditId);
+      return jsonResponse({ error: "Both files are required.", hasUsage: !!file1, hasStripe: !!file2 }, 400);
     }
 
-    const { data: file1Data } = await supabase.storage.from("audit-files").download(file1.file_path);
-    const { data: file2Data } = await supabase.storage.from("audit-files").download(file2.file_path);
+    console.log("[analyze-audit] Downloading files from storage...");
+    const { data: file1Data, error: file1Error } = await supabase.storage.from("audit-files").download(file1.file_path);
+    const { data: file2Data, error: file2Error } = await supabase.storage.from("audit-files").download(file2.file_path);
+
+    if (file1Error || file2Error) {
+      console.error("[analyze-audit] Download errors - file1:", file1Error, "file2:", file2Error);
+    }
 
     if (!file1Data || !file2Data) {
+      console.error("[analyze-audit] Failed to download files");
+      await supabase.from("audits").update({ status: "error", error_message: "Failed to download files from storage." }).eq("id", auditId);
       return jsonResponse({ error: "Failed to download files." }, 500);
     }
 
+    console.log("[analyze-audit] Parsing CSV files...");
     const file1Text = await file1Data.text();
     const file2Text = await file2Data.text();
+    console.log("[analyze-audit] File sizes - usage:", file1Text.length, "chars, stripe:", file2Text.length, "chars");
 
     const file1Result = Papa.parse<Record<string, string>>(file1Text, { header: true, skipEmptyLines: true });
     const file2Result = Papa.parse<Record<string, string>>(file2Text, { header: true, skipEmptyLines: true });
+    console.log("[analyze-audit] Parsed rows - usage:", file1Result.data.length, "stripe:", file2Result.data.length);
 
     if (file1Result.errors.length > 0 || file2Result.errors.length > 0) {
       return jsonResponse(
@@ -1032,8 +1064,11 @@ serve(async (req) => {
     const VALID_STATUSES = ["detected", "verified", "resolved", "dismissed"] as const;
     const VALID_CONFIDENCES = ["low", "medium", "high"] as const;
 
+    console.log("[analyze-audit] Total anomalies detected:", anomalies.length);
+    
     if (anomalies.length > 0) {
       const uniqueCategories = [...new Set(anomalies.map((a) => a.category))];
+      console.log("[analyze-audit] Anomaly categories:", uniqueCategories);
 
       const sanitizedAnomalies = anomalies.map((a) => {
         let mappedCategory = categoryMapping[a.category];
@@ -1071,9 +1106,10 @@ serve(async (req) => {
         };
       });
 
+      console.log("[analyze-audit] Inserting", sanitizedAnomalies.length, "anomalies...");
       const { error: insertError } = await supabase.from("anomalies").insert(sanitizedAnomalies);
       if (insertError) {
-        console.error("Failed to insert anomalies:", insertError);
+        console.error("[analyze-audit] Failed to insert anomalies:", insertError);
         await supabase
           .from("audits")
           .update({ status: "error", error_message: insertError.message })
@@ -1089,6 +1125,9 @@ serve(async (req) => {
           500
         );
       }
+      console.log("[analyze-audit] Anomalies inserted successfully");
+    } else {
+      console.log("[analyze-audit] No anomalies detected - this may indicate data format issues");
     }
 
     const totalAnomalies = anomalies.length;
@@ -1178,10 +1217,13 @@ Be specific and actionable. Focus on the highest-impact items. Mention specific 
       error_message: null,
     };
 
+    console.log("[analyze-audit] Updating audit to 'review' status...");
     const { error: updateError } = await supabase.from("audits").update(updateData).eq("id", auditId);
     if (updateError) {
-      console.error("Failed to update audit:", updateError);
+      console.error("[analyze-audit] Failed to update audit:", updateError);
     }
+
+    console.log("[analyze-audit] ✅ Analysis complete! Anomalies:", totalAnomalies, "Revenue at risk:", annualRevenueAtRisk);
 
     return jsonResponse({
       success: true,
