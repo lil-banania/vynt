@@ -34,7 +34,7 @@ const STRIPE_COLUMN_HINTS: Record<string, string[]> = {
   status: ["status", "state", "payment_status", "charge_status", "outcome"],
   created: ["created", "date", "timestamp", "created_at", "payment_date"],
   currency: ["currency", "curr"],
-  description: ["description", "memo", "note", "product", "plan"],
+  description: ["description", "memo", "note", "product", "plan", "statement_descriptor"],
   customer_email: ["customer_email", "email", "receipt_email"],
   customer_name: ["customer_name", "name", "customer_description"],
   amount_refunded: ["amount_refunded", "refunded", "refund_amount"],
@@ -43,6 +43,7 @@ const STRIPE_COLUMN_HINTS: Record<string, string[]> = {
   payout_id: ["payout_id", "payout", "transfer_id", "destination"],
   balance_transaction: ["balance_transaction", "balance_txn", "txn"],
   payment_intent: ["payment_intent", "pi_id"],
+  invoice: ["invoice", "invoice_id", "inv_id"],
 };
 
 // For usage/product logs (backward compatibility)
@@ -862,6 +863,241 @@ serve(async (req) => {
             difference: grossDiff,
             detection_method: "summary_gross_total_diff",
             confidence_reason: "Aggregated gross totals differ beyond configured threshold.",
+            impact_type: "probable",
+          },
+        });
+      }
+
+      // ============================================================================
+      // NEW: Product/Plan Categorization Mismatch Detection
+      // ============================================================================
+      const planKeywords: Record<string, string[]> = {
+        starter: ["starter", "basic", "lite", "free"],
+        premium: ["premium", "pro", "plus"],
+        business: ["business", "team", "growth"],
+        enterprise: ["enterprise", "custom", "unlimited"],
+      };
+
+      function detectPlanType(text: string | undefined): string | null {
+        if (!text) return null;
+        const lower = text.toLowerCase();
+        for (const [plan, keywords] of Object.entries(planKeywords)) {
+          if (keywords.some((kw) => lower.includes(kw))) return plan;
+        }
+        return null;
+      }
+
+      const categorizationMismatches: { customer: string; dbPlan: string; stripePlan: string; amount: number }[] = [];
+
+      for (const dbRow of dbRows) {
+        if (dbRow.status?.toLowerCase() !== "succeeded") continue;
+        const dbPlan = detectPlanType(dbRow.description);
+        if (!dbPlan) continue;
+
+        const stripeMatch = stripeRows.find(
+          (s) => s.customer === dbRow.customer_id && parseAmount(s.amount) === parseAmount(dbRow.amount)
+        );
+
+        if (stripeMatch) {
+          const stripePlan = detectPlanType(stripeMatch.description);
+          if (stripePlan && dbPlan !== stripePlan) {
+            categorizationMismatches.push({
+              customer: dbRow.customer_id || "unknown",
+              dbPlan,
+              stripePlan,
+              amount: parseAmount(dbRow.amount),
+            });
+          }
+        }
+      }
+
+      if (categorizationMismatches.length > 0) {
+        const totalAmount = categorizationMismatches.reduce((sum, m) => sum + m.amount, 0);
+        anomalies.push({
+          audit_id: auditId,
+          category: "pricing_mismatch",
+          customer_id: "MULTIPLE",
+          status: "detected",
+          confidence: categorizationMismatches.length > 3 ? "high" : "medium",
+          annual_impact: 0, // Informational, no direct revenue impact
+          monthly_impact: 0,
+          description: `${categorizationMismatches.length} transaction(s) have mismatched plan categorizations between DB and Stripe. Example: DB shows "${categorizationMismatches[0].dbPlan}" but Stripe shows "${categorizationMismatches[0].stripePlan}".`,
+          root_cause: "Statement descriptor or product metadata not synced with internal plan names. Could affect revenue reporting by plan.",
+          recommendation: "Standardize product naming across systems. Update Stripe statement_descriptor to match internal plan names.",
+          detected_at: now,
+          metadata: {
+            count: categorizationMismatches.length,
+            total_amount: totalAmount,
+            samples: categorizationMismatches.slice(0, 5),
+            detection_method: "plan_categorization_mismatch",
+            confidence_reason: "DB plan name differs from Stripe description/statement_descriptor.",
+            impact_type: "informational",
+          },
+        });
+      }
+
+      // ============================================================================
+      // NEW: Email Integrity Check
+      // ============================================================================
+      const emailMismatches: { customer: string; dbEmail: string; stripeEmail: string }[] = [];
+
+      for (const dbRow of dbRows) {
+        if (!dbRow.customer_email || dbRow.status?.toLowerCase() !== "succeeded") continue;
+
+        const stripeMatch = stripeRows.find(
+          (s) => s.customer === dbRow.customer_id && parseAmount(s.amount) === parseAmount(dbRow.amount)
+        );
+
+        if (stripeMatch && stripeMatch.customer_email) {
+          const dbEmailNorm = dbRow.customer_email.toLowerCase().trim();
+          const stripeEmailNorm = stripeMatch.customer_email.toLowerCase().trim();
+
+          if (dbEmailNorm !== stripeEmailNorm) {
+            emailMismatches.push({
+              customer: dbRow.customer_id || "unknown",
+              dbEmail: dbRow.customer_email,
+              stripeEmail: stripeMatch.customer_email,
+            });
+          }
+        }
+      }
+
+      if (emailMismatches.length > 0) {
+        anomalies.push({
+          audit_id: auditId,
+          category: "other",
+          customer_id: "MULTIPLE",
+          status: "detected",
+          confidence: emailMismatches.length > 5 ? "high" : "medium",
+          annual_impact: 0,
+          monthly_impact: 0,
+          description: `${emailMismatches.length} customer(s) have different email addresses in DB vs Stripe. This may indicate data sync issues or customer profile updates not propagated.`,
+          root_cause: "Customer email updated in one system but not synchronized to the other.",
+          recommendation: "Implement bidirectional sync for customer profile changes. Review affected accounts for accuracy.",
+          detected_at: now,
+          metadata: {
+            count: emailMismatches.length,
+            samples: emailMismatches.slice(0, 5),
+            detection_method: "email_integrity_check",
+            confidence_reason: "Email addresses differ between DB and Stripe for same customer.",
+            impact_type: "informational",
+          },
+        });
+      }
+
+      // ============================================================================
+      // NEW: Invoice ID Cross-Reference Matching
+      // ============================================================================
+      const invoiceMismatches: { dbInvoice: string; dbCustomer: string; amount: number }[] = [];
+
+      for (const dbRow of dbRows) {
+        if (!dbRow.invoice_id || dbRow.status?.toLowerCase() !== "succeeded") continue;
+
+        // First try to match by invoice_id directly
+        const stripeByInvoice = stripeRows.find(
+          (s) => s.invoice === dbRow.invoice_id || s.payment_intent === dbRow.invoice_id
+        );
+
+        if (!stripeByInvoice) {
+          // Invoice exists in DB but not in Stripe - potential sync issue
+          const stripeByCustomerAmount = stripeRows.find(
+            (s) => s.customer === dbRow.customer_id && parseAmount(s.amount) === parseAmount(dbRow.amount)
+          );
+
+          if (!stripeByCustomerAmount) {
+            invoiceMismatches.push({
+              dbInvoice: dbRow.invoice_id,
+              dbCustomer: dbRow.customer_id || "unknown",
+              amount: parseAmount(dbRow.amount),
+            });
+          }
+        }
+      }
+
+      if (invoiceMismatches.length > 0) {
+        const totalAmount = invoiceMismatches.reduce((sum, m) => sum + m.amount, 0);
+        anomalies.push({
+          audit_id: auditId,
+          category: "unbilled_usage",
+          customer_id: "MULTIPLE",
+          status: "detected",
+          confidence: "high",
+          annual_impact: totalAmount / 100,
+          monthly_impact: totalAmount / 100,
+          description: `${invoiceMismatches.length} invoice(s) in DB cannot be matched to any Stripe record (by invoice_id or customer+amount). Total: ${formatCurrency(totalAmount, currencyCode)}`,
+          root_cause: "Invoices generated but payments not captured in Stripe, or invoice ID format mismatch.",
+          recommendation: "Cross-reference invoice IDs. Check if payments were processed outside Stripe or invoice generation failed.",
+          detected_at: now,
+          metadata: {
+            count: invoiceMismatches.length,
+            total_amount: totalAmount,
+            samples: invoiceMismatches.slice(0, 5),
+            detection_method: "invoice_id_cross_reference",
+            confidence_reason: "Invoice in DB has no corresponding Stripe record.",
+            impact_type: "probable",
+          },
+        });
+      }
+
+      // ============================================================================
+      // NEW: Cross-System Duplicate Detection (same transaction, different IDs)
+      // ============================================================================
+      const crossSystemDuplicates: { dbTxn: string; stripeTxn: string; customer: string; amount: number; timeDiff: number }[] = [];
+
+      for (const dbRow of dbRows) {
+        if (dbRow.status?.toLowerCase() !== "succeeded") continue;
+        const dbDate = parseDate(dbRow.created_at);
+        if (!dbDate) continue;
+
+        const amount = parseAmount(dbRow.amount);
+        const matchingStripeRows = stripeRows.filter(
+          (s) =>
+            s.customer === dbRow.customer_id &&
+            parseAmount(s.amount) === amount &&
+            s.object !== "refund" &&
+            s.status?.toLowerCase() === "succeeded"
+        );
+
+        // If we have multiple Stripe matches for the same DB transaction, it might indicate duplication
+        if (matchingStripeRows.length > 1) {
+          for (let i = 1; i < matchingStripeRows.length; i++) {
+            const stripeDate = parseDate(matchingStripeRows[i].created);
+            const timeDiff = stripeDate ? Math.abs(dbDate.getTime() - stripeDate.getTime()) / (1000 * 60 * 60) : 0;
+            
+            // Only flag if within 24 hours - likely duplicates vs legitimate repeat purchases
+            if (timeDiff < 24) {
+              crossSystemDuplicates.push({
+                dbTxn: dbRow.transaction_id || "unknown",
+                stripeTxn: matchingStripeRows[i].id || "unknown",
+                customer: dbRow.customer_id || "unknown",
+                amount,
+                timeDiff: Math.round(timeDiff * 10) / 10,
+              });
+            }
+          }
+        }
+      }
+
+      if (crossSystemDuplicates.length > 0) {
+        const totalAmount = crossSystemDuplicates.reduce((sum, d) => sum + d.amount, 0);
+        anomalies.push({
+          audit_id: auditId,
+          category: "duplicate_charge",
+          customer_id: "MULTIPLE",
+          status: "detected",
+          confidence: "high",
+          annual_impact: totalAmount / 100,
+          monthly_impact: totalAmount / 100,
+          description: `${crossSystemDuplicates.length} potential cross-system duplicate(s) detected: same customer and amount within 24 hours. Total at risk: ${formatCurrency(totalAmount, currencyCode)}`,
+          root_cause: "Same transaction may have been recorded multiple times with different IDs, possibly due to webhook retries or manual re-entry.",
+          recommendation: "Review each flagged transaction. Implement idempotency keys and deduplication logic in payment processing.",
+          detected_at: now,
+          metadata: {
+            count: crossSystemDuplicates.length,
+            total_amount: totalAmount,
+            samples: crossSystemDuplicates.slice(0, 5),
+            detection_method: "cross_system_duplicate_detection",
+            confidence_reason: "Multiple Stripe records match single DB transaction within 24h window.",
             impact_type: "probable",
           },
         });
