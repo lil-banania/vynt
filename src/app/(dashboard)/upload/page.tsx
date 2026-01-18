@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import FileUploader from "@/components/upload/FileUploader";
@@ -15,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { createClient } from "@/lib/supabase/client";
 
 type UploadStep = "usage" | "stripe" | "review";
 
@@ -24,8 +25,11 @@ type AnalysisResult = {
   aiInsights: string | null;
 } | null;
 
+type AnalysisStatus = "idle" | "processing" | "review" | "error";
+
 const UploadPage = () => {
   const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
   const [auditId, setAuditId] = useState<string | null>(null);
   const [isCreatingAudit, setIsCreatingAudit] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -34,8 +38,22 @@ const UploadPage = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult>(null);
+  const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>("idle");
 
   const createAuditInFlight = useRef<Promise<string> | null>(null);
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+      if (pollingTimeoutRef.current) {
+        clearTimeout(pollingTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const ensureAudit = async () => {
     if (auditId) {
@@ -89,6 +107,7 @@ const UploadPage = () => {
 
     setIsSubmitting(true);
     setErrorMessage(null);
+    setAnalysisStatus("processing");
 
     try {
       // Run the automated analysis
@@ -120,17 +139,81 @@ const UploadPage = () => {
         throw new Error(errorMsg);
       }
 
-      setAnalysisResult({
-        anomaliesDetected: data.anomaliesDetected ?? 0,
-        annualRevenueAtRisk: data.annualRevenueAtRisk ?? 0,
-        aiInsights: data.aiInsights ?? null,
-      });
-      setIsSubmitted(true);
+      const pollAuditStatus = async () => {
+        if (!auditId) return;
+        const { data: audit, error } = await supabase
+          .from("audits")
+          .select(
+            "status, total_anomalies, annual_revenue_at_risk, error_message, ai_insights"
+          )
+          .eq("id", auditId)
+          .maybeSingle();
+
+        if (error || !audit) {
+          setAnalysisStatus("error");
+          setErrorMessage(error?.message ?? "Unable to fetch audit status.");
+          setIsSubmitting(false);
+          return;
+        }
+
+        if (audit.status === "review") {
+          setAnalysisResult({
+            anomaliesDetected: audit.total_anomalies ?? 0,
+            annualRevenueAtRisk: audit.annual_revenue_at_risk ?? 0,
+            aiInsights: audit.ai_insights ?? null,
+          });
+          setIsSubmitted(true);
+          setAnalysisStatus("review");
+          setIsSubmitting(false);
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+          if (pollingTimeoutRef.current) {
+            clearTimeout(pollingTimeoutRef.current);
+            pollingTimeoutRef.current = null;
+          }
+          return;
+        }
+
+        if (audit.status === "error") {
+          setAnalysisStatus("error");
+          setErrorMessage(audit.error_message ?? "Analysis failed.");
+          setIsSubmitting(false);
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+          if (pollingTimeoutRef.current) {
+            clearTimeout(pollingTimeoutRef.current);
+            pollingTimeoutRef.current = null;
+          }
+          return;
+        }
+      };
+
+      await pollAuditStatus();
+
+      if (!pollingIntervalRef.current) {
+        pollingIntervalRef.current = setInterval(pollAuditStatus, 2000);
+      }
+
+      if (!pollingTimeoutRef.current) {
+        pollingTimeoutRef.current = setTimeout(() => {
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+          setAnalysisStatus("error");
+          setErrorMessage("Analysis is taking too long. Please try again later.");
+          setIsSubmitting(false);
+        }, 5 * 60 * 1000);
+      }
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "Unable to start analysis."
       );
-    } finally {
+      setAnalysisStatus("error");
       setIsSubmitting(false);
     }
   };

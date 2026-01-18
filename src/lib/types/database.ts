@@ -4,6 +4,7 @@ export type AuditStatus =
   | "processing"
   | "review"
   | "in_progress"
+  | "error"
   | "completed"
   | "published";
 export type AnomalyStatus = "detected" | "verified" | "resolved" | "dismissed";
@@ -54,6 +55,9 @@ export type Audit = {
   audit_period_end: string;
   total_anomalies: number;
   annual_revenue_at_risk: number | null;
+  ai_insights?: string | null;
+  error_message?: string | null;
+  processed_at?: string | null;
   created_at: string;
   published_at: string | null;
   created_by: string;

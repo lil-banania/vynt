@@ -7,6 +7,7 @@ const VALID_STATUSES = new Set([
   "pending",
   "processing",
   "review",
+  "error",
   "published",
 ]);
 

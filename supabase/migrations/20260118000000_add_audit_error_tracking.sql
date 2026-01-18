@@ -1,0 +1,6 @@
+ALTER TABLE audits
+ADD COLUMN IF NOT EXISTS error_message TEXT,
+ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ,
+ADD COLUMN IF NOT EXISTS ai_insights TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_audits_status ON audits(status);
