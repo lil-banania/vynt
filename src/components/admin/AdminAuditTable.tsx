@@ -30,6 +30,7 @@ const statusConfig: Record<AuditStatus, { label: string; color: string }> = {
   processing: { label: "Processing", color: "bg-blue-600" },
   review: { label: "Ready", color: "bg-emerald-600" },
   in_progress: { label: "In Progress", color: "bg-blue-600" },
+  error: { label: "Error", color: "bg-rose-600" },
   completed: { label: "Completed", color: "bg-emerald-600" },
   published: { label: "Published", color: "bg-slate-600" },
 };
