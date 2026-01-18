@@ -47,6 +47,8 @@ const SettingsPage = async () => {
     .eq("id", profile.organization_id)
     .maybeSingle<Organization & { reconciliation_config?: StoredConfig | null }>();
 
+  const isAdmin = profile?.role === "vynt_admin";
+
   const rawConfig = organization?.reconciliation_config ?? null;
   const initialPreset =
     rawConfig && typeof rawConfig.preset === "string" ? rawConfig.preset : "custom";
@@ -64,13 +66,24 @@ const SettingsPage = async () => {
         </p>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-6">
-        <ReconciliationSettingsForm
-          initialConfig={initialConfig}
-          initialPreset={initialPreset}
-          organizationName={organization?.name ?? "your organization"}
-        />
-      </div>
+      {isAdmin ? (
+        <div className="rounded-lg border border-slate-200 bg-white p-6">
+          <ReconciliationSettingsForm
+            initialConfig={initialConfig}
+            initialPreset={initialPreset}
+            organizationName={organization?.name ?? "your organization"}
+          />
+        </div>
+      ) : (
+        <div className="rounded-lg border border-slate-200 bg-white p-6">
+          <p className="text-slate-600">
+            No advanced settings available for your account.
+          </p>
+          <p className="text-sm text-slate-500 mt-2">
+            Contact your administrator if you need to modify reconciliation parameters.
+          </p>
+        </div>
+      )}
     </div>
   );
 };

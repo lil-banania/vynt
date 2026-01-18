@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { AlertTriangle, DollarSign, Users, FileText, Target, ArrowLeft } from "lucide-react";
+import { AlertTriangle, DollarSign, Users, FileText, Target, ArrowLeft, Sparkles } from "lucide-react";
 
 import AuditSummary from "@/components/dashboard/AuditSummary";
 import AnomalyTable from "@/components/dashboard/AnomalyTable";
@@ -73,10 +73,10 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
   const { data: audit } = await supabase
     .from("audits")
     .select(
-      "id, organization_id, status, audit_period_start, audit_period_end, total_anomalies, annual_revenue_at_risk, created_at, published_at, created_by"
+      "id, organization_id, status, audit_period_start, audit_period_end, total_anomalies, annual_revenue_at_risk, ai_insights, created_at, published_at, created_by"
     )
     .eq("id", id)
-    .maybeSingle<Audit>();
+    .maybeSingle<Audit & { ai_insights?: string | null }>();
 
   if (!audit) {
     notFound();
@@ -87,8 +87,13 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
     redirect("/dashboard");
   }
 
-  // Only show published audits to clients
-  if (audit.status !== "published") {
+  // Redirect to processing page if audit is still being analyzed
+  if (audit.status === "processing" || audit.status === "pending" || audit.status === "draft") {
+    redirect(`/audit/${id}/processing`);
+  }
+
+  // Only show completed audits (review or published) to clients
+  if (audit.status !== "published" && audit.status !== "review") {
     redirect("/dashboard");
   }
 
@@ -185,6 +190,21 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
         }}
         categoryBreakdown={categoryBreakdown}
       />
+
+      {/* AI Executive Summary */}
+      {audit.ai_insights && (
+        <section className="print:break-inside-avoid">
+          <div className="rounded-xl border-2 border-blue-200 bg-blue-50 p-6">
+            <h2 className="text-xl font-bold text-blue-900 mb-3 flex items-center gap-2">
+              <Sparkles className="h-5 w-5" />
+              AI Executive Summary
+            </h2>
+            <p className="text-blue-800 leading-relaxed whitespace-pre-wrap">
+              {audit.ai_insights}
+            </p>
+          </div>
+        </section>
+      )}
 
       {/* Top Issues Section */}
       {topIssues.length > 0 && (

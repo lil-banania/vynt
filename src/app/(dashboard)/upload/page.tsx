@@ -1,30 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Loader2 } from "lucide-react";
 
 import FileUploader from "@/components/upload/FileUploader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 
 type UploadStep = "usage" | "stripe" | "review";
-
-type AnalysisResult = {
-  anomaliesDetected: number;
-  annualRevenueAtRisk: number;
-  aiInsights: string | null;
-} | null;
-
-type AnalysisStatus = "idle" | "processing" | "review" | "error";
 
 const UploadPage = () => {
   const router = useRouter();
@@ -34,24 +19,8 @@ const UploadPage = () => {
   const [usageUploaded, setUsageUploaded] = useState(false);
   const [stripeUploaded, setStripeUploaded] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSubmitted, setIsSubmitted] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult>(null);
-  const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>("idle");
 
   const createAuditInFlight = useRef<Promise<string> | null>(null);
-  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
-      if (pollingTimeoutRef.current) {
-        clearTimeout(pollingTimeoutRef.current);
-      }
-    };
-  }, []);
 
   const ensureAudit = async () => {
     if (auditId) {
@@ -105,10 +74,8 @@ const UploadPage = () => {
 
     setIsSubmitting(true);
     setErrorMessage(null);
-    setAnalysisStatus("processing");
 
     try {
-      // Run the automated analysis
       const response = await fetch("/api/audits/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -118,106 +85,19 @@ const UploadPage = () => {
       const data = await response.json().catch(() => null);
 
       if (!response.ok) {
-        // Build detailed error message
         let errorMsg = data?.error ?? "Analysis failed.";
         if (data?.details) {
           errorMsg += ` Details: ${data.details}`;
         }
-        if (data?.hint) {
-          errorMsg += ` Hint: ${data.hint}`;
-        }
-        if (data?.mappedCategories) {
-          errorMsg += ` Categories: ${data.mappedCategories.join(", ")}`;
-        }
-        if (data?.sample) {
-          console.error("Failed anomaly sample:", data.sample);
-          console.error("Original categories:", data.originalCategories);
-          console.error("Mapped categories:", data.mappedCategories);
-        }
         throw new Error(errorMsg);
       }
 
-      const pollAuditStatus = async () => {
-        if (!auditId) return;
-        try {
-          const pollResponse = await fetch("/api/audits/poll", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ auditId }),
-          });
-
-          const pollData = await pollResponse.json().catch(() => null);
-
-          if (!pollResponse.ok || !pollData) {
-            setAnalysisStatus("error");
-            setErrorMessage(pollData?.error ?? "Unable to fetch audit status.");
-            setIsSubmitting(false);
-            return;
-          }
-
-          if (pollData.status === "review") {
-            setAnalysisResult({
-              anomaliesDetected: pollData.totalAnomalies ?? 0,
-              annualRevenueAtRisk: pollData.annualRevenueAtRisk ?? 0,
-              aiInsights: pollData.aiInsights ?? null,
-            });
-            setIsSubmitted(true);
-            setAnalysisStatus("review");
-            setIsSubmitting(false);
-            if (pollingIntervalRef.current) {
-              clearInterval(pollingIntervalRef.current);
-              pollingIntervalRef.current = null;
-            }
-            if (pollingTimeoutRef.current) {
-              clearTimeout(pollingTimeoutRef.current);
-              pollingTimeoutRef.current = null;
-            }
-            return;
-          }
-
-          if (pollData.status === "error") {
-            setAnalysisStatus("error");
-            setErrorMessage(pollData.errorMessage ?? "Analysis failed.");
-            setIsSubmitting(false);
-            if (pollingIntervalRef.current) {
-              clearInterval(pollingIntervalRef.current);
-              pollingIntervalRef.current = null;
-            }
-            if (pollingTimeoutRef.current) {
-              clearTimeout(pollingTimeoutRef.current);
-              pollingTimeoutRef.current = null;
-            }
-            return;
-          }
-        } catch {
-          setAnalysisStatus("error");
-          setErrorMessage("Unable to fetch audit status.");
-          setIsSubmitting(false);
-        }
-      };
-
-      await pollAuditStatus();
-
-      if (!pollingIntervalRef.current) {
-        pollingIntervalRef.current = setInterval(pollAuditStatus, 2000);
-      }
-
-      if (!pollingTimeoutRef.current) {
-        pollingTimeoutRef.current = setTimeout(() => {
-          if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = null;
-          }
-          setAnalysisStatus("error");
-          setErrorMessage("Analysis is taking too long. Please try again later.");
-          setIsSubmitting(false);
-        }, 5 * 60 * 1000);
-      }
+      // Redirect to processing page
+      router.push(`/audit/${auditId}/processing`);
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "Unable to start analysis."
       );
-      setAnalysisStatus("error");
       setIsSubmitting(false);
     }
   };
@@ -240,14 +120,6 @@ const UploadPage = () => {
       return "secondary";
     }
     return "outline";
-  };
-
-  const formatCurrency = (value: number) => {
-    return value.toLocaleString("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 0,
-    });
   };
 
   return (
@@ -304,14 +176,16 @@ const UploadPage = () => {
                 size="lg"
                 className="w-full sm:w-auto"
                 onClick={handleStartAnalysis}
-                disabled={
-                  !usageUploaded ||
-                  !stripeUploaded ||
-                  isSubmitting ||
-                  isSubmitted
-                }
+                disabled={!usageUploaded || !stripeUploaded || isSubmitting}
               >
-                {isSubmitting ? "Analyzing..." : "Start Analysis"}
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Starting Analysis...
+                  </>
+                ) : (
+                  "Start Analysis"
+                )}
               </Button>
             </CardContent>
           </Card>
@@ -351,62 +225,6 @@ const UploadPage = () => {
           </div>
         </>
       )}
-
-      <Dialog
-        open={isSubmitted}
-        onOpenChange={(open) => {
-          if (!open) {
-            setIsSubmitted(false);
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Analysis Complete</DialogTitle>
-            <DialogDescription className="space-y-3 pt-2">
-              <p>
-                Your revenue audit has been analyzed automatically.
-              </p>
-              {analysisResult && (
-                <div className="space-y-3">
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-slate-900">
-                    <div className="grid gap-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-slate-600">Anomalies detected:</span>
-                        <span className="font-semibold">{analysisResult.anomaliesDetected}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-600">Annual revenue at risk:</span>
-                        <span className="font-semibold text-rose-600">
-                          {formatCurrency(analysisResult.annualRevenueAtRisk)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  {analysisResult.aiInsights && (
-                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-                      <div className="mb-1 font-semibold">AI Analysis</div>
-                      <p className="whitespace-pre-wrap">{analysisResult.aiInsights}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-              <p className="text-slate-500">
-                Our team will review the findings and publish the full report within 3 business days.
-              </p>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => router.push("/dashboard")}
-            >
-              Back to dashboard
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
