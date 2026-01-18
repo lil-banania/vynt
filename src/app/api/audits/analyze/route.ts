@@ -266,8 +266,36 @@ export async function POST(request: Request) {
   const file1Result = Papa.parse<Record<string, string>>(file1Text, { header: true, skipEmptyLines: true });
   const file2Result = Papa.parse<Record<string, string>>(file2Text, { header: true, skipEmptyLines: true });
 
+  if (file1Result.errors.length > 0 || file2Result.errors.length > 0) {
+    return NextResponse.json(
+      {
+        error: "Failed to parse CSV files.",
+        details: [
+          ...file1Result.errors.map((err) => `usage_logs: ${err.message}`),
+          ...file2Result.errors.map((err) => `stripe_export: ${err.message}`),
+        ].join(" | "),
+      },
+      { status: 400 }
+    );
+  }
+
   const file1Headers = file1Result.meta.fields ?? [];
   const file2Headers = file2Result.meta.fields ?? [];
+
+  if (file1Headers.length === 0 || file2Headers.length === 0) {
+    return NextResponse.json({ error: "CSV headers are missing." }, { status: 400 });
+  }
+
+  const file1Rows = file1Result.data.filter(
+    (row): row is Record<string, string> => Boolean(row) && typeof row === "object"
+  );
+  const file2Rows = file2Result.data.filter(
+    (row): row is Record<string, string> => Boolean(row) && typeof row === "object"
+  );
+
+  if (file1Rows.length === 0 || file2Rows.length === 0) {
+    return NextResponse.json({ error: "CSV files do not contain any valid rows." }, { status: 400 });
+  }
 
   // Detect file type based on columns
   const isDbTransactionLog = findColumn(file1Headers, ["transaction_id", "txn_id", "net_amount", "fee_amount"]) !== null;
@@ -292,8 +320,8 @@ export async function POST(request: Request) {
       stripeMapping[key] = findColumn(file2Headers, hints);
     }
 
-    const dbRows = file1Result.data.map((row) => mapRow(row, dbMapping));
-    const stripeRows = file2Result.data.map((row) => mapRow(row, stripeMapping));
+    const dbRows = file1Rows.map((row) => mapRow(row, dbMapping));
+    const stripeRows = file2Rows.map((row) => mapRow(row, stripeMapping));
     const currencyCode =
       config.currencyCode ||
       stripeRows.find((row) => row.currency)?.currency?.toUpperCase() ||
@@ -866,8 +894,8 @@ export async function POST(request: Request) {
       stripeMapping[key] = findColumn(file2Headers, hints);
     }
 
-    const usageRows = file1Result.data.map((row) => mapRow(row, usageMapping));
-    const stripeRows = file2Result.data.map((row) => mapRow(row, stripeMapping));
+    const usageRows = file1Rows.map((row) => mapRow(row, usageMapping));
+    const stripeRows = file2Rows.map((row) => mapRow(row, stripeMapping));
 
     // Build customer maps
     const usageByCustomer = new Map<string, typeof usageRows>();
@@ -1152,7 +1180,7 @@ export async function POST(request: Request) {
   let periodEnd: string | null = null;
 
   const allTimestamps: number[] = [];
-  for (const row of file1Result.data) {
+  for (const row of file1Rows) {
     const dateFields = ["created_at", "timestamp", "date", "created"];
     for (const field of dateFields) {
       const value = row[field as keyof typeof row];
@@ -1162,7 +1190,7 @@ export async function POST(request: Request) {
       }
     }
   }
-  for (const row of file2Result.data) {
+  for (const row of file2Rows) {
     const dateFields = ["created", "date", "timestamp"];
     for (const field of dateFields) {
       const value = row[field as keyof typeof row];
