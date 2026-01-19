@@ -43,7 +43,16 @@ export async function POST(request: Request) {
   }
 
   // For chunked audits that are still processing, trigger next chunk
-  if (audit.is_chunked && audit.status === "processing" && (audit.chunks_completed ?? 0) < (audit.chunks_total ?? 1)) {
+  if (audit.is_chunked && audit.status === "processing") {
+    // Check for stuck chunks (processing for > 2 minutes) and reset them
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    await adminSupabase
+      .from("analysis_queue")
+      .update({ status: "pending", started_at: null })
+      .eq("audit_id", auditId)
+      .eq("status", "processing")
+      .lt("started_at", twoMinutesAgo);
+
     // Check if there are pending chunks
     const { count: pendingCount } = await adminSupabase
       .from("analysis_queue")
@@ -52,6 +61,7 @@ export async function POST(request: Request) {
       .eq("status", "pending");
 
     if (pendingCount && pendingCount > 0) {
+      console.log(`[poll] ${pendingCount} pending chunks for audit ${auditId}, triggering process-chunk`);
       // Trigger chunk processing
       const edgeFunctionUrl = `${supabaseUrl}/functions/v1/process-chunk`;
       fetch(edgeFunctionUrl, {
@@ -60,8 +70,44 @@ export async function POST(request: Request) {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${serviceRoleKey}`,
         },
-        body: JSON.stringify({ trigger: "poll" }),
+        body: JSON.stringify({ trigger: "poll", auditId }),
       }).catch((err) => console.error("[poll] Failed to trigger process-chunk:", err));
+    } else {
+      // No pending chunks but audit still processing - check if all chunks completed
+      const { count: completedCount } = await adminSupabase
+        .from("analysis_queue")
+        .select("*", { count: "exact", head: true })
+        .eq("audit_id", auditId)
+        .eq("status", "completed");
+
+      if (completedCount && completedCount >= (audit.chunks_total ?? 0)) {
+        // All chunks completed but audit not finalized - finalize now
+        console.log(`[poll] All ${completedCount} chunks completed, finalizing audit ${auditId}`);
+        
+        const { count: anomalyCount } = await adminSupabase
+          .from("anomalies")
+          .select("*", { count: "exact", head: true })
+          .eq("audit_id", auditId);
+
+        const { data: allAnomalies } = await adminSupabase
+          .from("anomalies")
+          .select("annual_impact")
+          .eq("audit_id", auditId);
+
+        const annualRevenueAtRisk = allAnomalies?.reduce((sum, a) => sum + (a.annual_impact ?? 0), 0) ?? 0;
+
+        await adminSupabase
+          .from("audits")
+          .update({
+            status: "review",
+            chunks_completed: completedCount,
+            total_anomalies: anomalyCount ?? 0,
+            annual_revenue_at_risk: annualRevenueAtRisk,
+            processed_at: new Date().toISOString(),
+            ai_insights: `Analysis completed. Found ${anomalyCount ?? 0} potential revenue issues totaling $${annualRevenueAtRisk.toFixed(2)} annually at risk.`,
+          })
+          .eq("id", auditId);
+      }
     }
   }
 
