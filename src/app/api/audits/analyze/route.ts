@@ -69,9 +69,9 @@ export async function POST(request: Request) {
 
   // Fire and forget - don't await the full response
   fetch(edgeFunctionUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
       "Authorization": `Bearer ${serviceRoleKey}`,
     },
     body: JSON.stringify({ auditId, config }),
