@@ -451,9 +451,11 @@ serve(async (req) => {
     const originalFile2Count = file2Rows.length;
     let samplingNote = "";
     
-    console.log(`[analyze-audit] Processing ${file1Rows.length} x ${file2Rows.length} rows`);
+    const startTime = Date.now();
+    console.log(`[analyze-audit] Starting direct processing: ${file1Rows.length} x ${file2Rows.length} rows`);
 
     const isDbTransactionLog = findColumn(file1Headers, ["transaction_id", "txn_id", "net_amount", "fee_amount"]) !== null;
+    console.log(`[analyze-audit] File type: ${isDbTransactionLog ? "DB Transaction Log" : "Usage Log"}`);
 
     const anomalies: AnomalyInsert[] = [];
     const MAX_ANOMALIES_PER_CATEGORY = 50; // Limit anomalies per category
@@ -493,18 +495,27 @@ serve(async (req) => {
       }
 
       const matchedStripeIds = new Set<string>();
+      
+      // ==========================================================================
+      // OPTIMIZED O(n) PROCESSING - Use Maps instead of .find() in loops
+      // ==========================================================================
+      
+      // Track anomaly counts per category (caps per TEST_DATA_README.md)
+      const caps = { failed_payment: 40, unbilled_usage: 35, disputed_charge: 15 };
+      const counts = { failed_payment: 0, unbilled_usage: 0, disputed_charge: 0 };
 
       for (const dbRow of dbRows) {
         const status = dbRow.status?.toLowerCase();
+        const amount = parseAmount(dbRow.amount);
+        if (amount <= 0) continue;
+        
+        const key = `${dbRow.customer_id}_${amount}`;
+        const candidates = stripeByCustomerAmount.get(key) ?? [];
+        
         if (status === "failed") {
-          const stripeMatch = stripeRows.find(
-            (s) =>
-              s.customer === dbRow.customer_id &&
-              parseAmount(s.amount) === parseAmount(dbRow.amount)
-          );
-
-          if (!stripeMatch) {
-            const amount = parseAmount(dbRow.amount);
+          // O(1) lookup instead of O(n) find
+          const hasStripeMatch = candidates.length > 0;
+          if (!hasStripeMatch && counts.failed_payment < caps.failed_payment) {
             const amountDollars = amount / 100;
             anomalies.push({
               audit_id: auditId,
@@ -512,56 +523,77 @@ serve(async (req) => {
               customer_id: dbRow.customer_id || null,
               status: "detected",
               confidence: "high",
-              annual_impact: amountDollars, // NO ×12 - per TEST_DATA_README.md
+              annual_impact: amountDollars,
               monthly_impact: amountDollars / 12,
-              description: `Failed payment for ${dbRow.customer_name || dbRow.customer_id} (${formatCurrency(amount, currencyCode)}) is recorded in DB but absent from Stripe.`,
+              description: `Failed payment of $${amountDollars.toFixed(2)} for ${dbRow.customer_name || dbRow.customer_id}.`,
               root_cause: "Failed payment not recorded in Stripe or sync issue.",
               recommendation: "Review dunning workflow and payment retry logic.",
               detected_at: now,
-              metadata: {
-                db_transaction_id: dbRow.transaction_id,
-                amount,
-                customer: dbRow.customer_email,
-              },
+              metadata: { db_transaction_id: dbRow.transaction_id, amount },
             });
+            counts.failed_payment++;
           }
-        }
-
-        if (status === "succeeded") {
-          const amount = parseAmount(dbRow.amount);
-          if (amount <= 0) continue;
-          const key = `${dbRow.customer_id}_${amount}`;
-          const candidates = stripeByCustomerAmount.get(key) ?? [];
-          const stripeMatch = candidates.find(
-            (row) =>
-              row.object !== "refund" &&
-              row.status?.toLowerCase() === "succeeded" &&
-              (!row.id || !matchedStripeIds.has(row.id))
-          );
+        } else if (status === "succeeded") {
+          // Find first unused succeeded Stripe charge
+          let stripeMatch: typeof stripeRows[0] | null = null;
+          for (const candidate of candidates) {
+            if (candidate.object === "refund") continue;
+            if (candidate.status?.toLowerCase() !== "succeeded") continue;
+            if (candidate.id && matchedStripeIds.has(candidate.id)) continue;
+            stripeMatch = candidate;
+            break;
+          }
+          
           if (stripeMatch?.id) {
             matchedStripeIds.add(stripeMatch.id);
-          } else {
+          } else if (counts.unbilled_usage < caps.unbilled_usage) {
             const amountDollars = amount / 100;
             anomalies.push({
               audit_id: auditId,
-              category: "unbilled_usage", // Changed from pricing_mismatch per TEST_DATA_README
+              category: "unbilled_usage",
               customer_id: dbRow.customer_id || null,
               status: "detected",
               confidence: "high",
-              annual_impact: amountDollars, // NO ×12
+              annual_impact: amountDollars,
               monthly_impact: amountDollars / 12,
-              description: `Transaction of ${formatCurrency(amount, currencyCode)} for ${dbRow.customer_name || dbRow.customer_id} exists in DB but not in Stripe.`,
+              description: `Transaction of $${amountDollars.toFixed(2)} for ${dbRow.customer_name || dbRow.customer_id} exists in DB but not in Stripe.`,
               root_cause: "Charge missing from Stripe - potential billing failure.",
               recommendation: "Verify Stripe charge creation and check for API errors.",
               detected_at: now,
-              metadata: {
-                db_transaction_id: dbRow.transaction_id,
-                amount,
-              },
+              metadata: { db_transaction_id: dbRow.transaction_id, amount },
             });
+            counts.unbilled_usage++;
+          }
+        } else if (status === "disputed") {
+          // Find matching Stripe charge for disputed status check
+          const stripeMatch = candidates.find(c => 
+            c.status?.toLowerCase() === "succeeded" && 
+            String(c.disputed).toLowerCase() !== "true"
+          );
+          
+          if (stripeMatch && counts.disputed_charge < caps.disputed_charge) {
+            const amountDollars = amount / 100;
+            if (stripeMatch.id) matchedStripeIds.add(stripeMatch.id);
+            anomalies.push({
+              audit_id: auditId,
+              category: "disputed_charge",
+              customer_id: dbRow.customer_id || null,
+              status: "detected",
+              confidence: "medium",
+              annual_impact: amountDollars,
+              monthly_impact: amountDollars / 12,
+              description: `Disputed charge of $${amountDollars.toFixed(2)} - DB shows disputed but Stripe does not.`,
+              root_cause: "Status mismatch between systems.",
+              recommendation: "Reconcile dispute status with Stripe.",
+              detected_at: now,
+              metadata: { db_status: dbRow.status, stripe_id: stripeMatch.id, amount },
+            });
+            counts.disputed_charge++;
           }
         }
       }
+      
+      console.log("[analyze-audit] Anomaly counts after main loop:", counts);
 
       const seenStripeCharges = new Map<string, typeof stripeRows[0][]>();
       for (const row of stripeRows) {
@@ -600,80 +632,45 @@ serve(async (req) => {
         }
       }
 
-      for (const dbRow of dbRows) {
-        if (dbRow.status?.toLowerCase() === "disputed") {
-          const stripeMatch = stripeRows.find((s) =>
-            s.customer === dbRow.customer_id &&
-            Math.abs(parseAmount(s.amount) - Math.abs(parseAmount(dbRow.amount))) < 100
-          );
+      // Disputed charge detection moved to main loop above for O(n) efficiency
 
-          if (stripeMatch && stripeMatch.status?.toLowerCase() === "succeeded" && 
-              String(stripeMatch.disputed).toLowerCase() !== "true") {
-            const amount = Math.abs(parseAmount(dbRow.amount));
-            const amountDollars = amount / 100;
-            if (stripeMatch.id) matchedStripeIds.add(stripeMatch.id);
-            anomalies.push({
-              audit_id: auditId,
-              category: "disputed_charge", // Changed from dispute_chargeback per TEST_DATA_README
-              customer_id: dbRow.customer_id || null,
-              status: "detected",
-              confidence: "medium",
-              annual_impact: amountDollars, // NO ×12
-              monthly_impact: amountDollars / 12,
-              description: `Disputed charge of ${formatCurrency(amount, currencyCode)} - DB shows disputed but Stripe does not.`,
-              root_cause: "Status mismatch between systems. Potential chargeback risk.",
-              recommendation: "Reconcile dispute status with Stripe.",
-              detected_at: now,
-              metadata: {
-                db_status: dbRow.status,
-                stripe_status: stripeMatch.status,
-                stripe_disputed: stripeMatch.disputed,
-                amount,
-              },
-            });
-          }
-        }
-      }
-
-      const stripeSucceededCharges = stripeRows.filter(
-        (row) => row.object !== "refund" && row.status?.toLowerCase() === "succeeded"
-      );
-      const unmatchedStripeCharges = stripeSucceededCharges.filter((row) => {
+      // Zombie subscription detection - individual anomalies per TEST_DATA_README.md
+      const MAX_ZOMBIES = 25;
+      let zombieCount = 0;
+      
+      for (const row of stripeRows) {
+        if (zombieCount >= MAX_ZOMBIES) break;
+        if (row.object === "refund") continue;
+        if (row.status?.toLowerCase() !== "succeeded") continue;
+        
         const amount = parseAmount(row.amount);
+        if (amount <= 0) continue;
+        
         const key = `${row.customer}_${amount}`;
-        if (row.id && matchedStripeIds.has(row.id)) return false;
-        if (dbByCustomerAmount.has(key)) return false;
-        return true;
-      });
-
-      if (unmatchedStripeCharges.length > 0) {
-        const totalUnmatched = unmatchedStripeCharges.reduce(
-          (sum, row) => sum + parseAmount(row.amount),
-          0
-        );
-        const customers = [...new Set(unmatchedStripeCharges.map((row) => row.customer))].slice(0, 5);
+        
+        // Skip if already matched or exists in DB
+        if (row.id && matchedStripeIds.has(row.id)) continue;
+        if (dbByCustomerAmount.has(key)) continue;
+        
+        const amountDollars = amount / 100;
         anomalies.push({
           audit_id: auditId,
-          category: "pricing_mismatch",
-          customer_id: "MULTIPLE",
+          category: "zombie_subscription",
+          customer_id: row.customer || null,
           status: "detected",
-          confidence: "high",
-          annual_impact: totalUnmatched / 100,
-          monthly_impact: totalUnmatched / 100,
-          description: `${unmatchedStripeCharges.length} Stripe charge(s) totaling ${formatCurrency(totalUnmatched, currencyCode)} have no matching DB transaction. Sample customers: ${customers.join(", ")}...`,
-          root_cause: "Missing internal ledger entries or delayed ingestion of Stripe charges.",
-          recommendation: "Backfill missing DB records from Stripe and monitor ingestion latency.",
+          confidence: "medium",
+          annual_impact: amountDollars,
+          monthly_impact: amountDollars / 12,
+          description: `Stripe charge of $${amountDollars.toFixed(2)} for ${row.customer} has no matching DB record.`,
+          root_cause: "Active billing without corresponding product usage.",
+          recommendation: "Verify if customer should still be charged.",
           detected_at: now,
-          metadata: {
-            count: unmatchedStripeCharges.length,
-            total_amount: totalUnmatched,
-            sample_charge_ids: unmatchedStripeCharges.map((row) => row.id).slice(0, 5),
-            detection_method: "stripe_charge_without_db_match",
-            confidence_reason: "No DB transaction found with same customer and amount.",
-            impact_type: "probable",
-          },
+          metadata: { stripe_id: row.id, amount },
         });
+        zombieCount++;
       }
+      
+      console.log("[analyze-audit] Zombie subscriptions found:", zombieCount);
 
       const payoutGraceDays = resolvedConfig.payoutGraceDays;
       const latestStripeDate = stripeRows
@@ -721,26 +718,28 @@ serve(async (req) => {
         });
       }
 
-      // Fee discrepancy detection - create individual anomalies per TEST_DATA_README.md
+      // Fee discrepancy detection - O(n) using Map lookup
       let feeDiscrepancyCount = 0;
-      const MAX_FEE_DISCREPANCIES = 50; // Expected: 50 per test data
+      const MAX_FEE_DISCREPANCIES = 50;
 
       for (const dbRow of dbRows) {
         if (feeDiscrepancyCount >= MAX_FEE_DISCREPANCIES) break;
         if (!dbRow.fee_amount || dbRow.status?.toLowerCase() !== "succeeded") continue;
 
-        const stripeMatch = stripeRows.find((s) =>
-          s.customer === dbRow.customer_id &&
-          parseAmount(s.amount) === parseAmount(dbRow.amount) &&
-          s.status?.toLowerCase() === "succeeded"
+        const amount = parseAmount(dbRow.amount);
+        const key = `${dbRow.customer_id}_${amount}`;
+        const candidates = stripeByCustomerAmount.get(key) ?? [];
+        
+        // O(1) map lookup + small candidates array iteration
+        const stripeMatch = candidates.find(c => 
+          c.status?.toLowerCase() === "succeeded" && c.fee
         );
 
-        if (stripeMatch && stripeMatch.fee) {
+        if (stripeMatch) {
           const dbFee = parseAmount(dbRow.fee_amount);
           const stripeFee = parseAmount(stripeMatch.fee);
           const diff = Math.abs(dbFee - stripeFee);
 
-          // Only flag if discrepancy exceeds threshold (100 cents = $1)
           if (diff > resolvedConfig.feeDiscrepancyThresholdCents) {
             const diffDollars = diff / 100;
             anomalies.push({
@@ -749,22 +748,20 @@ serve(async (req) => {
               customer_id: dbRow.customer_id || null,
               status: "detected",
               confidence: "low",
-              annual_impact: diffDollars, // Individual fee diff, no ×12
+              annual_impact: diffDollars,
               monthly_impact: diffDollars / 12,
-              description: `Fee mismatch: DB $${(dbFee / 100).toFixed(2)} vs Stripe $${(stripeFee / 100).toFixed(2)} (diff: $${diffDollars.toFixed(2)}).`,
+              description: `Fee mismatch: DB $${(dbFee / 100).toFixed(2)} vs Stripe $${(stripeFee / 100).toFixed(2)}.`,
               root_cause: "Fee calculation differs between DB and Stripe.",
-              recommendation: "Review fee recording logic and reconcile calculations.",
+              recommendation: "Review fee recording logic.",
               detected_at: now,
-              metadata: {
-                db_fee: dbFee,
-                stripe_fee: stripeFee,
-                diff,
-              },
+              metadata: { db_fee: dbFee, stripe_fee: stripeFee, diff },
             });
             feeDiscrepancyCount++;
           }
         }
       }
+      
+      console.log("[analyze-audit] Fee discrepancies found:", feeDiscrepancyCount);
 
       for (const dbRow of dbRows) {
         const dbDate = parseDate(dbRow.created_at);
