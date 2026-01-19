@@ -243,20 +243,43 @@ serve(async (req) => {
       const dbRows = file1Rows.map((row) => mapRow(row as Record<string, string>, dbMapping));
       const stripeRows = file2Rows.map((row) => mapRow(row as Record<string, string>, stripeMapping));
 
+      const normalizeEmail = (value?: string | null) =>
+        value ? value.trim().toLowerCase() : null;
+
       // Build lookup maps for Stripe data
       const stripeByCustomerAmount = new Map<string, (typeof stripeRows)[0][]>();
+      const stripeByEmailAmount = new Map<string, (typeof stripeRows)[0][]>();
       for (const row of stripeRows) {
-        const key = `${row.customer}_${parseAmount(row.amount)}`;
+        const amount = parseAmount(row.amount);
+        const key = `${row.customer}_${amount}`;
         const existing = stripeByCustomerAmount.get(key) ?? [];
         existing.push(row);
         stripeByCustomerAmount.set(key, existing);
+
+        const email = normalizeEmail(row.customer_email);
+        if (email && amount > 0) {
+          const emailKey = `${email}_${amount}`;
+          const emailExisting = stripeByEmailAmount.get(emailKey) ?? [];
+          emailExisting.push(row);
+          stripeByEmailAmount.set(emailKey, emailExisting);
+        }
       }
       const dbByCustomerAmount = new Map<string, (typeof dbRows)[0][]>();
+      const dbByEmailAmount = new Map<string, (typeof dbRows)[0][]>();
       for (const row of dbRows) {
-        const key = `${row.customer_id}_${parseAmount(row.amount)}`;
+        const amount = parseAmount(row.amount);
+        const key = `${row.customer_id}_${amount}`;
         const existing = dbByCustomerAmount.get(key) ?? [];
         existing.push(row);
         dbByCustomerAmount.set(key, existing);
+
+        const email = normalizeEmail(row.customer_email);
+        if (email && amount > 0) {
+          const emailKey = `${email}_${amount}`;
+          const emailExisting = dbByEmailAmount.get(emailKey) ?? [];
+          emailExisting.push(row);
+          dbByEmailAmount.set(emailKey, emailExisting);
+        }
       }
 
       const stripeByInvoice = new Map<string, (typeof stripeRows)[0][]>();
@@ -281,10 +304,18 @@ serve(async (req) => {
       const getStripeMatches = (dbRow: Record<string, string>) => {
         const invoiceId = dbRow.invoice_id?.trim();
         if (invoiceId) return stripeByInvoice.get(invoiceId) ?? [];
-        const customerId = dbRow.customer_id?.trim();
         const amount = parseAmount(dbRow.amount);
-        if (!customerId || amount <= 0) return [];
-        return stripeByCustomerAmount.get(`${customerId}_${amount}`) ?? [];
+        if (amount <= 0) return [];
+        const customerId = dbRow.customer_id?.trim();
+        if (customerId) {
+          const matches = stripeByCustomerAmount.get(`${customerId}_${amount}`);
+          if (matches && matches.length > 0) return matches;
+        }
+        const email = normalizeEmail(dbRow.customer_email);
+        if (email) {
+          return stripeByEmailAmount.get(`${email}_${amount}`) ?? [];
+        }
+        return [];
       };
       const getBestStripeMatch = (dbRow: Record<string, string>) => {
         const matches = getStripeMatches(dbRow);
@@ -325,8 +356,14 @@ serve(async (req) => {
         }
         const customerId = stripeRow.customer?.trim();
         const amount = parseAmount(stripeRow.amount);
-        if (!customerId || amount <= 0) return false;
-        const candidates = dbByCustomerAmount.get(`${customerId}_${amount}`) ?? [];
+        if (amount <= 0) return false;
+        const candidatesByCustomer =
+          customerId ? dbByCustomerAmount.get(`${customerId}_${amount}`) ?? [] : [];
+        const email = normalizeEmail(stripeRow.customer_email);
+        const candidatesByEmail =
+          email ? dbByEmailAmount.get(`${email}_${amount}`) ?? [] : [];
+        const candidates =
+          candidatesByCustomer.length > 0 ? candidatesByCustomer : candidatesByEmail;
         if (candidates.length === 0) return false;
         const stripeDate = parseDate(stripeRow.created);
         if (!stripeDate) return true;
