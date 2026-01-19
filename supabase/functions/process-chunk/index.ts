@@ -245,10 +245,19 @@ serve(async (req) => {
 
       const normalizeEmail = (value?: string | null) =>
         value ? value.trim().toLowerCase() : null;
+      const normalizeName = (value?: string | null) => {
+        if (!value) return null;
+        return value
+          .toLowerCase()
+          .replace(/\s*\(customer\s*\d+\)\s*$/i, "")
+          .replace(/\s+/g, " ")
+          .trim();
+      };
 
       // Build lookup maps for Stripe data
       const stripeByCustomerAmount = new Map<string, (typeof stripeRows)[0][]>();
       const stripeByEmailAmount = new Map<string, (typeof stripeRows)[0][]>();
+      const stripeByNameAmount = new Map<string, (typeof stripeRows)[0][]>();
       for (const row of stripeRows) {
         const amount = parseAmount(row.amount);
         const key = `${row.customer}_${amount}`;
@@ -263,9 +272,18 @@ serve(async (req) => {
           emailExisting.push(row);
           stripeByEmailAmount.set(emailKey, emailExisting);
         }
+
+        const name = normalizeName(row.customer_name);
+        if (name && amount > 0) {
+          const nameKey = `${name}_${amount}`;
+          const nameExisting = stripeByNameAmount.get(nameKey) ?? [];
+          nameExisting.push(row);
+          stripeByNameAmount.set(nameKey, nameExisting);
+        }
       }
       const dbByCustomerAmount = new Map<string, (typeof dbRows)[0][]>();
       const dbByEmailAmount = new Map<string, (typeof dbRows)[0][]>();
+      const dbByNameAmount = new Map<string, (typeof dbRows)[0][]>();
       for (const row of dbRows) {
         const amount = parseAmount(row.amount);
         const key = `${row.customer_id}_${amount}`;
@@ -279,6 +297,14 @@ serve(async (req) => {
           const emailExisting = dbByEmailAmount.get(emailKey) ?? [];
           emailExisting.push(row);
           dbByEmailAmount.set(emailKey, emailExisting);
+        }
+
+        const name = normalizeName(row.customer_name);
+        if (name && amount > 0) {
+          const nameKey = `${name}_${amount}`;
+          const nameExisting = dbByNameAmount.get(nameKey) ?? [];
+          nameExisting.push(row);
+          dbByNameAmount.set(nameKey, nameExisting);
         }
       }
 
@@ -314,6 +340,10 @@ serve(async (req) => {
         const email = normalizeEmail(dbRow.customer_email);
         if (email) {
           return stripeByEmailAmount.get(`${email}_${amount}`) ?? [];
+        }
+        const name = normalizeName(dbRow.customer_name);
+        if (name) {
+          return stripeByNameAmount.get(`${name}_${amount}`) ?? [];
         }
         return [];
       };
@@ -362,8 +392,15 @@ serve(async (req) => {
         const email = normalizeEmail(stripeRow.customer_email);
         const candidatesByEmail =
           email ? dbByEmailAmount.get(`${email}_${amount}`) ?? [] : [];
+        const name = normalizeName(stripeRow.customer_name);
+        const candidatesByName =
+          name ? dbByNameAmount.get(`${name}_${amount}`) ?? [] : [];
         const candidates =
-          candidatesByCustomer.length > 0 ? candidatesByCustomer : candidatesByEmail;
+          candidatesByCustomer.length > 0
+            ? candidatesByCustomer
+            : candidatesByEmail.length > 0
+            ? candidatesByEmail
+            : candidatesByName;
         if (candidates.length === 0) return false;
         const stripeDate = parseDate(stripeRow.created);
         if (!stripeDate) return true;
