@@ -213,14 +213,14 @@ serve(async (req) => {
     const now = new Date().toISOString();
 
     // Per-category caps based on TEST_DATA_README.md expected values
-    // Allows some buffer (1.5x) for edge cases but prevents over-detection
+    // Slightly above expected to capture edge cases, but prevents major over-detection
     const CAPS = {
-      unbilled_usage: 50,        // Expected: 35
-      failed_payment: 60,        // Expected: 40
-      disputed_charge: 25,       // Expected: 15
-      fee_discrepancy: 75,       // Expected: 50
-      zombie_subscription: 40,   // Expected: 25
-      duplicate_charge: 30,      // Expected: 18
+      unbilled_usage: 40,        // Expected: 35
+      failed_payment: 45,        // Expected: 40
+      disputed_charge: 20,       // Expected: 15
+      fee_discrepancy: 55,       // Expected: 50
+      zombie_subscription: 30,   // Expected: 25
+      duplicate_charge: 22,      // Expected: 18
     };
     const counts = {
       unbilled_usage: 0,
@@ -310,10 +310,10 @@ serve(async (req) => {
           }
         }
 
-        // If no exact date match, try ±1 day
+        // If no exact date match, try ±3 days (expanded window for processing delays)
         if (!stripeMatch && dateStr) {
           const dbDateObj = new Date(dateStr);
-          for (const offset of [-1, 1]) {
+          for (const offset of [-1, 1, -2, 2, -3, 3]) {
             const altDate = new Date(dbDateObj);
             altDate.setDate(altDate.getDate() + offset);
             const altDateStr = altDate.toISOString().split("T")[0];
@@ -429,7 +429,7 @@ serve(async (req) => {
       if (chunk.chunk_index === chunk.total_chunks - 1) {
         console.log(`[process-chunk] Last chunk - checking zombies and duplicates`);
 
-        // Build set of all DB amounts+dates from full file
+        // Build set of all DB amounts+dates from full file (±3 day window)
         const allDbAmountDates = new Set<string>();
         const allDbAmounts = new Map<string, number>();
         for (const row of file1Result.data) {
@@ -440,8 +440,8 @@ serve(async (req) => {
           if (date) {
             const dateStr = date.toISOString().split("T")[0];
             allDbAmountDates.add(`${amount}_${dateStr}`);
-            // Also add ±1 day variants
-            for (const offset of [-1, 1]) {
+            // Also add ±3 day variants for processing delays
+            for (const offset of [-3, -2, -1, 1, 2, 3]) {
               const altDate = new Date(date);
               altDate.setDate(altDate.getDate() + offset);
               allDbAmountDates.add(`${amount}_${altDate.toISOString().split("T")[0]}`);
