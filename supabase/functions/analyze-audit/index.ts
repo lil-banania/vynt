@@ -373,12 +373,12 @@ serve(async (req) => {
     await supabase.from("anomalies").delete().eq("audit_id", auditId);
 
     // ============================================================================
-    // BACKGROUND TASKS: Queue large files for chunked processing
+    // PROCESSING STRATEGY: Direct for small files, chunked for large
     // ============================================================================
-    // Increased limit to handle test data (12K rows) directly without chunking
-    // Chunked processing loses state between chunks, causing inaccurate results
-    const DIRECT_PROCESSING_LIMIT = 15000; // Process directly if under this limit
-    const CHUNK_SIZE = 2000; // Rows per chunk for background processing (fallback only)
+    // Edge Function timeout is 60s (Free) or 150s (Pro)
+    // With O(n) optimizations, ~5000 rows should process in ~30 seconds
+    const DIRECT_PROCESSING_LIMIT = 5000; // Direct processing threshold
+    const CHUNK_SIZE = 2000; // Rows per chunk
     const totalRows = Math.max(file1Rows.length, file2Rows.length);
     
     if (totalRows > DIRECT_PROCESSING_LIMIT) {
