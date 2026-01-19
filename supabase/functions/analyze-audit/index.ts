@@ -335,22 +335,25 @@ serve(async (req) => {
     }
 
     // ============================================================================
-    // OPTIMIZATION: Sample large files to avoid timeout
+    // OPTIMIZATION: Sample large files to avoid timeout (Edge Function = 60s max)
     // ============================================================================
-    const MAX_ROWS = 5000;
-    const isLargeFile = file1Rows.length > MAX_ROWS || file2Rows.length > MAX_ROWS;
+    const MAX_ROWS = 2000; // Reduced for faster processing
+    const originalFile1Count = file1Rows.length;
+    const originalFile2Count = file2Rows.length;
     let samplingNote = "";
     
     if (file1Rows.length > MAX_ROWS) {
       console.log(`[analyze-audit] Sampling file1: ${file1Rows.length} -> ${MAX_ROWS} rows`);
       file1Rows = file1Rows.slice(0, MAX_ROWS);
-      samplingNote = `Analyzed first ${MAX_ROWS} of ${file1Result.data.length} rows. `;
+      samplingNote = `⚠️ Large file detected. Analyzed ${MAX_ROWS} of ${originalFile1Count} transactions. `;
     }
     if (file2Rows.length > MAX_ROWS) {
       console.log(`[analyze-audit] Sampling file2: ${file2Rows.length} -> ${MAX_ROWS} rows`);
       file2Rows = file2Rows.slice(0, MAX_ROWS);
-      samplingNote += `Stripe export: first ${MAX_ROWS} of ${file2Result.data.length} rows.`;
+      samplingNote += `Stripe: ${MAX_ROWS} of ${originalFile2Count} rows.`;
     }
+    
+    console.log(`[analyze-audit] Processing ${file1Rows.length} x ${file2Rows.length} rows`);
 
     const isDbTransactionLog = findColumn(file1Headers, ["transaction_id", "txn_id", "net_amount", "fee_amount"]) !== null;
 
@@ -889,8 +892,9 @@ serve(async (req) => {
 
       // ============================================================================
       // NEW: Product/Plan Categorization Mismatch Detection (with error handling)
+      // Skip for large files to avoid timeout
       // ============================================================================
-      try {
+      if (originalFile1Count <= 2000 && originalFile2Count <= 2000) try {
         const planKeywords: Record<string, string[]> = {
           starter: ["starter", "basic", "lite", "free"],
           premium: ["premium", "pro", "plus"],
@@ -960,8 +964,9 @@ serve(async (req) => {
 
       // ============================================================================
       // NEW: Email Integrity Check (with error handling)
+      // Skip for large files to avoid timeout
       // ============================================================================
-      try {
+      if (originalFile1Count <= 2000 && originalFile2Count <= 2000) try {
         const emailMismatches: { customer: string; dbEmail: string; stripeEmail: string }[] = [];
 
         for (const dbRow of dbRows) {
@@ -1012,8 +1017,9 @@ serve(async (req) => {
 
       // ============================================================================
       // NEW: Invoice ID Cross-Reference Matching (with error handling)
+      // Skip for large files to avoid timeout
       // ============================================================================
-      try {
+      if (originalFile1Count <= 2000 && originalFile2Count <= 2000) try {
         const invoiceMismatches: { dbInvoice: string; dbCustomer: string; amount: number }[] = [];
 
         for (const dbRow of dbRows) {
@@ -1067,8 +1073,9 @@ serve(async (req) => {
 
       // ============================================================================
       // NEW: Cross-System Duplicate Detection (with error handling)
+      // Skip for large files to avoid timeout
       // ============================================================================
-      try {
+      if (originalFile1Count <= 2000 && originalFile2Count <= 2000) try {
         const crossSystemDuplicates: { dbTxn: string; stripeTxn: string; customer: string; amount: number; timeDiff: number }[] = [];
 
         for (const dbRow of dbRows) {
