@@ -277,6 +277,7 @@ serve(async (req) => {
       }
 
       const FEE_DISCREPANCY_THRESHOLD_CENTS = 100;
+      const MATCH_WINDOW_DAYS = 7;
       const getStripeMatches = (dbRow: Record<string, string>) => {
         const invoiceId = dbRow.invoice_id?.trim();
         if (invoiceId) return stripeByInvoice.get(invoiceId) ?? [];
@@ -284,6 +285,62 @@ serve(async (req) => {
         const amount = parseAmount(dbRow.amount);
         if (!customerId || amount <= 0) return [];
         return stripeByCustomerAmount.get(`${customerId}_${amount}`) ?? [];
+      };
+      const getBestStripeMatch = (dbRow: Record<string, string>) => {
+        const matches = getStripeMatches(dbRow);
+        if (matches.length === 0) return null;
+        const invoiceId = dbRow.invoice_id?.trim();
+        if (invoiceId) {
+          return matches[0];
+        }
+        const dbDate =
+          parseDate(dbRow.created_at) ??
+          parseDate(dbRow.created) ??
+          parseDate(dbRow.timestamp);
+        if (!dbDate) {
+          return matches[0];
+        }
+        let best: (typeof matches)[0] | null = null;
+        let bestDiff = Number.POSITIVE_INFINITY;
+        for (const match of matches) {
+          const stripeDate = parseDate(match.created);
+          if (!stripeDate) continue;
+          const diffDays =
+            Math.abs(dbDate.getTime() - stripeDate.getTime()) /
+            (1000 * 60 * 60 * 24);
+          if (diffDays < bestDiff) {
+            best = match;
+            bestDiff = diffDays;
+          }
+        }
+        if (best && bestDiff <= MATCH_WINDOW_DAYS) {
+          return best;
+        }
+        return null;
+      };
+      const hasDbMatchForStripe = (stripeRow: Record<string, string>) => {
+        const invoiceId = stripeRow.invoice?.trim();
+        if (invoiceId && dbByInvoice.has(invoiceId)) {
+          return true;
+        }
+        const customerId = stripeRow.customer?.trim();
+        const amount = parseAmount(stripeRow.amount);
+        if (!customerId || amount <= 0) return false;
+        const candidates = dbByCustomerAmount.get(`${customerId}_${amount}`) ?? [];
+        if (candidates.length === 0) return false;
+        const stripeDate = parseDate(stripeRow.created);
+        if (!stripeDate) return true;
+        return candidates.some((row) => {
+          const dbDate =
+            parseDate(row.created_at) ??
+            parseDate(row.created) ??
+            parseDate(row.timestamp);
+          if (!dbDate) return true;
+          const diffDays =
+            Math.abs(dbDate.getTime() - stripeDate.getTime()) /
+            (1000 * 60 * 60 * 24);
+          return diffDays <= MATCH_WINDOW_DAYS;
+        });
       };
 
       // 1. DB transaction checks (unbilled usage, failed payments, disputed, fee discrepancies)
@@ -293,10 +350,11 @@ serve(async (req) => {
         if (!customerId || amount <= 0) continue;
 
         const stripeMatches = getStripeMatches(dbRow);
+        const bestStripeMatch = getBestStripeMatch(dbRow);
         const status = dbRow.status?.toLowerCase();
 
         if (status === "failed") {
-          if (stripeMatches.length === 0 && canAdd("failed_payment")) {
+          if (!bestStripeMatch && canAdd("failed_payment")) {
             anomalies.push({
               audit_id: chunk.audit_id,
               category: "failed_payment",
@@ -317,12 +375,12 @@ serve(async (req) => {
         }
 
         if (status === "disputed") {
-          const stripeMatch = stripeMatches.find((row) => {
-            const disputedFlag = String(row.disputed ?? "").toLowerCase();
-            const stripeStatus = row.status?.toLowerCase();
-            return disputedFlag !== "true" && (stripeStatus === "succeeded" || stripeStatus === "paid");
-          });
-          if (stripeMatch && canAdd("disputed_charge")) {
+          if (bestStripeMatch) {
+            const disputedFlag = String(bestStripeMatch.disputed ?? "").toLowerCase();
+            const stripeStatus = bestStripeMatch.status?.toLowerCase();
+            const isStripeDisputed =
+              disputedFlag === "true" || stripeStatus === "disputed";
+            if (!isStripeDisputed && canAdd("disputed_charge")) {
             anomalies.push({
               audit_id: chunk.audit_id,
               category: "disputed_charge",
@@ -335,15 +393,16 @@ serve(async (req) => {
               root_cause: "Status mismatch between internal records and Stripe export.",
               recommendation: "Verify dispute status in Stripe and reconcile dispute handling.",
               detected_at: now,
-              metadata: { db_transaction_id: dbRow.transaction_id, amount, stripe_id: stripeMatch.id },
+              metadata: { db_transaction_id: dbRow.transaction_id, amount, stripe_id: bestStripeMatch.id },
             });
             record("disputed_charge");
+            }
           }
           continue;
         }
 
         if (status === "succeeded" || status === "paid" || status === "complete" || status === "completed") {
-          if (stripeMatches.length === 0) {
+          if (!bestStripeMatch) {
             if (canAdd("unbilled_usage")) {
               anomalies.push({
                 audit_id: chunk.audit_id,
@@ -362,7 +421,7 @@ serve(async (req) => {
               record("unbilled_usage");
             }
           } else {
-            const stripeMatch = stripeMatches[0];
+            const stripeMatch = bestStripeMatch;
             const dbFee = parseAmount(dbRow.fee_amount);
             const stripeFee = parseAmount(stripeMatch.fee);
             if (
@@ -401,10 +460,7 @@ serve(async (req) => {
           const customerId = stripeRow.customer?.trim();
           const amount = parseAmount(stripeRow.amount);
           if (!customerId || amount <= 0) continue;
-          const invoiceId = stripeRow.invoice?.trim();
-          if (invoiceId && dbByInvoice.has(invoiceId)) continue;
-          const key = `${customerId}_${amount}`;
-          if (dbByCustomerAmount.has(key)) continue;
+          if (hasDbMatchForStripe(stripeRow)) continue;
 
           anomalies.push({
             audit_id: chunk.audit_id,
