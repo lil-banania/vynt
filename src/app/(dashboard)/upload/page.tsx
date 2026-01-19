@@ -310,7 +310,9 @@ const UploadPage = () => {
       )}
 
       {/* Results Dialog */}
-      <Dialog open={showResultDialog} onOpenChange={setShowResultDialog}>
+      <Dialog open={showResultDialog} onOpenChange={(open) => {
+        if (!open) router.push("/dashboard");
+      }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -350,16 +352,17 @@ const UploadPage = () => {
                       </p>
                     </div>
                   )}
+
+                  <p className="text-sm text-slate-500 text-center pt-2">
+                    Our team will review your audit and contact you within 48 hours.
+                  </p>
                 </div>
               )}
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => router.push("/dashboard")}>
+          <DialogFooter>
+            <Button className="w-full" onClick={() => router.push("/dashboard")}>
               Back to Dashboard
-            </Button>
-            <Button onClick={() => router.push(`/audit/${auditId}`)}>
-              View Full Report
             </Button>
           </DialogFooter>
         </DialogContent>
