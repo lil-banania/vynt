@@ -57,6 +57,19 @@ function parseDate(value: string | undefined): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// Normalize customer ID for consistent matching
+function normalizeCustomerId(id: string | undefined): string {
+  if (!id) return "";
+  return id.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+// Check if two dates are within N days of each other
+function isWithinDays(d1: Date | null, d2: Date | null, days: number): boolean {
+  if (!d1 || !d2) return true; // If no date, allow match
+  const diffMs = Math.abs(d1.getTime() - d2.getTime());
+  return diffMs <= days * 24 * 60 * 60 * 1000;
+}
+
 serve(async (req) => {
   const startTime = Date.now();
   console.log("[process-chunk] Started");
@@ -147,12 +160,22 @@ serve(async (req) => {
     const matchedStripeIds = new Set<string>(prevMatches?.map(m => m.stripe_id).filter(Boolean) ?? []);
     console.log(`[process-chunk] Previously matched: ${matchedStripeIds.size} Stripe IDs`);
 
-    // Build Stripe lookup map
+    // Build Stripe lookup map with NORMALIZED customer IDs
     const stripeByCustomerAmount = new Map<string, typeof stripeRows[0][]>();
     for (const row of stripeRows) {
-      const key = `${row.customer}_${parseAmount(row.amount)}`;
+      const normCustomer = normalizeCustomerId(row.customer);
+      const key = `${normCustomer}_${parseAmount(row.amount)}`;
       if (!stripeByCustomerAmount.has(key)) stripeByCustomerAmount.set(key, []);
       stripeByCustomerAmount.get(key)!.push(row);
+    }
+    
+    // Also build by amount only for fallback matching
+    const stripeByAmount = new Map<string, typeof stripeRows[0][]>();
+    for (const row of stripeRows) {
+      const amt = parseAmount(row.amount);
+      const key = `${amt}`;
+      if (!stripeByAmount.has(key)) stripeByAmount.set(key, []);
+      stripeByAmount.get(key)!.push(row);
     }
 
     // Process anomalies
@@ -180,17 +203,49 @@ serve(async (req) => {
       disputed: existingDisputed ?? 0,
     };
 
+    const DATE_WINDOW_DAYS = 3; // Match within ±3 days
+    
     for (const dbRow of dbRows) {
       const status = dbRow.status?.toLowerCase();
       const amount = parseAmount(dbRow.amount);
       if (amount <= 0) continue;
 
-      const key = `${dbRow.customer_id}_${amount}`;
+      const normCustomer = normalizeCustomerId(dbRow.customer_id);
+      const dbDate = parseDate(dbRow.created_at);
+      const key = `${normCustomer}_${amount}`;
       const candidates = stripeByCustomerAmount.get(key) ?? [];
       const amountDollars = amount / 100;
 
+      // Helper to find best match with date preference
+      const findBestMatch = (cands: typeof stripeRows[0][]) => {
+        let bestMatch: typeof stripeRows[0] | null = null;
+        let bestDateDiff = Infinity;
+        
+        for (const c of cands) {
+          if (c.object === "refund") continue;
+          if (c.status?.toLowerCase() !== "succeeded") continue;
+          if (c.id && matchedStripeIds.has(c.id)) continue;
+          
+          const stripeDate = parseDate(c.created);
+          if (!isWithinDays(dbDate, stripeDate, DATE_WINDOW_DAYS)) continue;
+          
+          // Prefer closest date
+          const diff = dbDate && stripeDate 
+            ? Math.abs(dbDate.getTime() - stripeDate.getTime()) 
+            : 0;
+          if (diff < bestDateDiff) {
+            bestDateDiff = diff;
+            bestMatch = c;
+          }
+        }
+        return bestMatch;
+      };
+
       if (status === "failed" && counts.failed < caps.failed) {
-        const hasMatch = candidates.length > 0;
+        // For failed: check if ANY matching charge exists (by customer+amount)
+        const hasMatch = candidates.some(c => 
+          c.status?.toLowerCase() === "succeeded" || c.status?.toLowerCase() === "failed"
+        );
         if (!hasMatch) {
           anomalies.push({
             audit_id: chunk.audit_id,
@@ -209,14 +264,24 @@ serve(async (req) => {
           counts.failed++;
         }
       } else if (status === "succeeded" || status === "paid") {
-        // Find unmatched Stripe charge
-        let match: typeof stripeRows[0] | null = null;
-        for (const c of candidates) {
-          if (c.object === "refund") continue;
-          if (c.status?.toLowerCase() !== "succeeded") continue;
-          if (c.id && matchedStripeIds.has(c.id)) continue;
-          match = c;
-          break;
+        // Strategy 1: Match by normalized customer + amount + date window
+        let match = findBestMatch(candidates);
+        
+        // Strategy 2: Fallback to amount + date only (for mismatched customer IDs)
+        if (!match && dbDate) {
+          const amountCandidates = stripeByAmount.get(`${amount}`) ?? [];
+          for (const c of amountCandidates) {
+            if (c.object === "refund") continue;
+            if (c.status?.toLowerCase() !== "succeeded") continue;
+            if (c.id && matchedStripeIds.has(c.id)) continue;
+            
+            const stripeDate = parseDate(c.created);
+            // Strict date window for amount-only matching
+            if (isWithinDays(dbDate, stripeDate, 1)) {
+              match = c;
+              break;
+            }
+          }
         }
 
         if (match?.id) {
@@ -249,6 +314,7 @@ serve(async (req) => {
           String(c.disputed).toLowerCase() !== "true"
         );
         if (match) {
+          if (match.id) matchedStripeIds.add(match.id);
           anomalies.push({
             audit_id: chunk.audit_id,
             category: "disputed_charge",
@@ -293,19 +359,33 @@ serve(async (req) => {
         .eq("audit_id", chunk.audit_id);
       const allMatchedIds = new Set<string>(allMatches?.map(m => m.stripe_id).filter(Boolean) ?? []);
 
-      // Build DB customer+amount set
+      // Build DB customer+amount set with NORMALIZED customer IDs
       const dbCustomerAmounts = new Set<string>();
+      const dbAmountDates = new Map<string, Date[]>(); // For fallback matching
       for (const row of parsed1.data) {
         const mapped = mapRow(row as Record<string, string>, dbMap);
         if (mapped.status?.toLowerCase() === "succeeded" || mapped.status?.toLowerCase() === "paid") {
           const amt = parseAmount(mapped.amount);
-          if (amt > 0) dbCustomerAmounts.add(`${mapped.customer_id}_${amt}`);
+          if (amt > 0) {
+            const normCust = normalizeCustomerId(mapped.customer_id);
+            dbCustomerAmounts.add(`${normCust}_${amt}`);
+            
+            // Track dates for amount-based matching
+            const date = parseDate(mapped.created_at);
+            if (date) {
+              const amtKey = `${amt}`;
+              if (!dbAmountDates.has(amtKey)) dbAmountDates.set(amtKey, []);
+              dbAmountDates.get(amtKey)!.push(date);
+            }
+          }
         }
       }
 
-      // Zombie detection
+      // Zombie detection with improved matching
       let zombieCount = 0;
       const MAX_ZOMBIES = 25;
+      const seenZombieKeys = new Set<string>(); // Avoid duplicates
+      
       for (const row of stripeRows) {
         if (zombieCount >= MAX_ZOMBIES) break;
         if (row.object === "refund" || row.status?.toLowerCase() !== "succeeded") continue;
@@ -313,9 +393,23 @@ serve(async (req) => {
         
         const amt = parseAmount(row.amount);
         if (amt <= 0) continue;
-        const key = `${row.customer}_${amt}`;
+        
+        const normCust = normalizeCustomerId(row.customer);
+        const key = `${normCust}_${amt}`;
+        
+        // Skip if already flagged this customer+amount combo
+        if (seenZombieKeys.has(key)) continue;
+        
+        // Check normalized customer+amount match
         if (dbCustomerAmounts.has(key)) continue;
+        
+        // Fallback: check if amount+date matches (±1 day)
+        const stripeDate = parseDate(row.created);
+        const dbDates = dbAmountDates.get(`${amt}`) ?? [];
+        const hasDateMatch = dbDates.some(d => isWithinDays(d, stripeDate, 1));
+        if (hasDateMatch) continue;
 
+        seenZombieKeys.add(key);
         anomalies.push({
           audit_id: chunk.audit_id,
           category: "zombie_subscription",
@@ -367,23 +461,33 @@ serve(async (req) => {
         dupeCount++;
       }
 
-      // Fee discrepancy detection
+      // Fee discrepancy detection with normalized IDs
       let feeCount = 0;
       const MAX_FEES = 50;
+      const seenFeeKeys = new Set<string>(); // Avoid duplicates
+      
       for (const row of parsed1.data) {
         if (feeCount >= MAX_FEES) break;
         const mapped = mapRow(row as Record<string, string>, dbMap);
         if (mapped.status?.toLowerCase() !== "succeeded" || !mapped.fee_amount) continue;
         
         const amt = parseAmount(mapped.amount);
-        const key = `${mapped.customer_id}_${amt}`;
-        const match = stripeByCustomerAmount.get(key)?.find(c => c.status?.toLowerCase() === "succeeded" && c.fee);
+        const normCust = normalizeCustomerId(mapped.customer_id);
+        const key = `${normCust}_${amt}`;
+        
+        // Skip if already checked this combo
+        if (seenFeeKeys.has(key)) continue;
+        
+        const match = stripeByCustomerAmount.get(key)?.find(c => 
+          c.status?.toLowerCase() === "succeeded" && c.fee
+        );
         
         if (match) {
           const dbFee = parseAmount(mapped.fee_amount);
           const stripeFee = parseAmount(match.fee);
           const diff = Math.abs(dbFee - stripeFee);
           if (diff > 100) { // $1 threshold
+            seenFeeKeys.add(key);
             anomalies.push({
               audit_id: chunk.audit_id,
               category: "fee_discrepancy",
