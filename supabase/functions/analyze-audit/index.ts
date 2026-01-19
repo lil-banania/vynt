@@ -334,6 +334,37 @@ serve(async (req) => {
       return jsonResponse({ error: "CSV files do not contain any valid rows." }, 400);
     }
 
+    // Pre-compute audit period range for both direct and chunked processing
+    let periodStart: string | null = null;
+    let periodEnd: string | null = null;
+    const allTimestamps: number[] = [];
+
+    for (const row of file1Rows) {
+      const dateFields = ["created_at", "timestamp", "date", "created"];
+      for (const field of dateFields) {
+        const value = row[field as keyof typeof row];
+        if (value) {
+          const date = parseDate(String(value));
+          if (date) allTimestamps.push(date.getTime());
+        }
+      }
+    }
+    for (const row of file2Rows) {
+      const dateFields = ["created", "date", "timestamp"];
+      for (const field of dateFields) {
+        const value = row[field as keyof typeof row];
+        if (value) {
+          const date = parseDate(String(value));
+          if (date) allTimestamps.push(date.getTime());
+        }
+      }
+    }
+
+    if (allTimestamps.length > 0) {
+      periodStart = new Date(Math.min(...allTimestamps)).toISOString();
+      periodEnd = new Date(Math.max(...allTimestamps)).toISOString();
+    }
+
     // ============================================================================
     // CLEANUP: Remove old queue entries and anomalies before re-running
     // ============================================================================
@@ -386,6 +417,8 @@ serve(async (req) => {
         is_chunked: true,
         chunks_total: numChunks,
         chunks_completed: 0,
+        audit_period_start: periodStart,
+        audit_period_end: periodEnd,
       }).eq("id", auditId);
       
       console.log(`[analyze-audit] Queued ${numChunks} chunks for audit ${auditId}`);
@@ -1473,36 +1506,6 @@ serve(async (req) => {
 
     const totalAnomalies = anomalies.length;
     const annualRevenueAtRisk = anomalies.reduce((sum, a) => sum + (a.annual_impact ?? 0), 0);
-
-    let periodStart: string | null = null;
-    let periodEnd: string | null = null;
-
-    const allTimestamps: number[] = [];
-    for (const row of file1Rows) {
-      const dateFields = ["created_at", "timestamp", "date", "created"];
-      for (const field of dateFields) {
-        const value = row[field as keyof typeof row];
-        if (value) {
-          const date = parseDate(String(value));
-          if (date) allTimestamps.push(date.getTime());
-        }
-      }
-    }
-    for (const row of file2Rows) {
-      const dateFields = ["created", "date", "timestamp"];
-      for (const field of dateFields) {
-        const value = row[field as keyof typeof row];
-        if (value) {
-          const date = parseDate(String(value));
-          if (date) allTimestamps.push(date.getTime());
-        }
-      }
-    }
-
-    if (allTimestamps.length > 0) {
-      periodStart = new Date(Math.min(...allTimestamps)).toISOString();
-      periodEnd = new Date(Math.max(...allTimestamps)).toISOString();
-    }
 
     let aiInsights: string | null = null;
     const openaiKey = Deno.env.get("OPENAI_API_KEY");

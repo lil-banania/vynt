@@ -33,12 +33,18 @@ const formatDateRange = (start: string | null, end: string | null) => {
   return `${format(start)} - ${format(end)}`;
 };
 
-// Only 4 categories allowed by database CHECK constraint
 const categoryConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
   zombie_subscription: { label: "Zombie Subscription", color: "bg-rose-500", icon: Users },
   unbilled_usage: { label: "Unbilled Usage", color: "bg-amber-500", icon: FileText },
   pricing_mismatch: { label: "Pricing Mismatch", color: "bg-purple-500", icon: DollarSign },
   duplicate_charge: { label: "Duplicate Charge", color: "bg-orange-500", icon: AlertTriangle },
+  failed_payment: { label: "Failed Payment", color: "bg-red-500", icon: AlertTriangle },
+  high_refund_rate: { label: "High Refund Rate", color: "bg-yellow-500", icon: AlertTriangle },
+  missing_in_stripe: { label: "Missing in Stripe", color: "bg-blue-500", icon: AlertTriangle },
+  missing_in_db: { label: "Missing in DB", color: "bg-cyan-500", icon: AlertTriangle },
+  amount_mismatch: { label: "Amount Mismatch", color: "bg-indigo-500", icon: AlertTriangle },
+  revenue_leakage: { label: "Revenue Leakage", color: "bg-pink-500", icon: AlertTriangle },
+  other: { label: "Other", color: "bg-slate-500", icon: AlertTriangle },
 };
 
 const AuditSummary = ({ audit, categoryBreakdown }: AuditSummaryProps) => {

@@ -85,6 +85,19 @@ function parseAmount(value: string | undefined): number {
   return Number(cleaned) || 0;
 }
 
+function parseDate(value: string | undefined): Date | null {
+  if (!value) return null;
+  const num = Number(value);
+  if (!Number.isNaN(num) && num > 1000000000 && num < 1000000000000) {
+    return new Date(num * 1000);
+  }
+  if (!Number.isNaN(num) && num >= 1000000000000) {
+    return new Date(num);
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function jsonResponse(payload: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -519,6 +532,36 @@ serve(async (req) => {
 
       if (newCompleted >= audit.chunks_total) {
         // All chunks done - finalize
+        let periodStart: string | null = null;
+        let periodEnd: string | null = null;
+        const allTimestamps: number[] = [];
+
+        for (const row of file1Result.data) {
+          const dateFields = ["created_at", "timestamp", "date", "created"];
+          for (const field of dateFields) {
+            const value = (row as Record<string, string>)[field];
+            if (value) {
+              const date = parseDate(String(value));
+              if (date) allTimestamps.push(date.getTime());
+            }
+          }
+        }
+        for (const row of file2Result.data) {
+          const dateFields = ["created", "date", "timestamp"];
+          for (const field of dateFields) {
+            const value = (row as Record<string, string>)[field];
+            if (value) {
+              const date = parseDate(String(value));
+              if (date) allTimestamps.push(date.getTime());
+            }
+          }
+        }
+
+        if (allTimestamps.length > 0) {
+          periodStart = new Date(Math.min(...allTimestamps)).toISOString();
+          periodEnd = new Date(Math.max(...allTimestamps)).toISOString();
+        }
+
         const { count: anomalyCount } = await supabase
           .from("anomalies")
           .select("*", { count: "exact", head: true })
@@ -538,6 +581,8 @@ serve(async (req) => {
             chunks_completed: newCompleted,
             total_anomalies: anomalyCount ?? 0,
             annual_revenue_at_risk: annualRevenueAtRisk,
+            audit_period_start: periodStart,
+            audit_period_end: periodEnd,
             processed_at: new Date().toISOString(),
             ai_insights: `Analysis completed. Processed ${audit.chunks_total} chunks. Found ${anomalyCount} potential revenue leaks totaling $${annualRevenueAtRisk.toFixed(2)} annually.`,
           })
