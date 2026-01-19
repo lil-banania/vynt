@@ -203,7 +203,7 @@ serve(async (req) => {
       disputed: existingDisputed ?? 0,
     };
 
-    const DATE_WINDOW_DAYS = 3; // Match within ±3 days
+    const DATE_WINDOW_DAYS = 5; // Match within ±5 days (increased for better accuracy)
     
     for (const dbRow of dbRows) {
       const status = dbRow.status?.toLowerCase();
@@ -270,18 +270,25 @@ serve(async (req) => {
         // Strategy 2: Fallback to amount + date only (for mismatched customer IDs)
         if (!match && dbDate) {
           const amountCandidates = stripeByAmount.get(`${amount}`) ?? [];
+          let bestFallback: typeof stripeRows[0] | null = null;
+          let bestFallbackDiff = Infinity;
+          
           for (const c of amountCandidates) {
             if (c.object === "refund") continue;
             if (c.status?.toLowerCase() !== "succeeded") continue;
             if (c.id && matchedStripeIds.has(c.id)) continue;
             
             const stripeDate = parseDate(c.created);
-            // Strict date window for amount-only matching
-            if (isWithinDays(dbDate, stripeDate, 1)) {
-              match = c;
-              break;
+            // Wider window (±2 days) for amount-only fallback
+            if (isWithinDays(dbDate, stripeDate, 2)) {
+              const diff = stripeDate ? Math.abs(dbDate.getTime() - stripeDate.getTime()) : 0;
+              if (diff < bestFallbackDiff) {
+                bestFallbackDiff = diff;
+                bestFallback = c;
+              }
             }
           }
+          match = bestFallback;
         }
 
         if (match?.id) {
@@ -403,10 +410,10 @@ serve(async (req) => {
         // Check normalized customer+amount match
         if (dbCustomerAmounts.has(key)) continue;
         
-        // Fallback: check if amount+date matches (±1 day)
+        // Fallback: check if amount+date matches (±3 days for zombie detection)
         const stripeDate = parseDate(row.created);
         const dbDates = dbAmountDates.get(`${amt}`) ?? [];
-        const hasDateMatch = dbDates.some(d => isWithinDays(d, stripeDate, 1));
+        const hasDateMatch = dbDates.some(d => isWithinDays(d, stripeDate, 3));
         if (hasDateMatch) continue;
 
         seenZombieKeys.add(key);
