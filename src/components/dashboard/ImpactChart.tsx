@@ -46,6 +46,34 @@ const CATEGORY_CONFIG: Record<
     label: "Duplicate Charge",
     color: "#f97316",
   },
+  failed_payment: {
+    label: "Failed Payment",
+    color: "#ef4444",
+  },
+  high_refund_rate: {
+    label: "High Refund Rate",
+    color: "#eab308",
+  },
+  missing_in_stripe: {
+    label: "Missing in Stripe",
+    color: "#3b82f6",
+  },
+  missing_in_db: {
+    label: "Missing in DB",
+    color: "#06b6d4",
+  },
+  amount_mismatch: {
+    label: "Amount Mismatch",
+    color: "#6366f1",
+  },
+  revenue_leakage: {
+    label: "Revenue Leakage",
+    color: "#ec4899",
+  },
+  other: {
+    label: "Other",
+    color: "#64748b",
+  },
 };
 
 const ImpactChart = ({ anomalies }: ImpactChartProps) => {
