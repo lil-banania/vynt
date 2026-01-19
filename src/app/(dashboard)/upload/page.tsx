@@ -152,6 +152,11 @@ const UploadPage = () => {
             return; // Don't stop polling on transient errors
           }
 
+          // Update progress from actual chunk completion if available
+          if (pollData.isChunked && pollData.progress !== null) {
+            setProgress(pollData.progress);
+          }
+
           if (pollData.status === "review" || pollData.status === "published") {
             stopPolling();
             setProgress(100);

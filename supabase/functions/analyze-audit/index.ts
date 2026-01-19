@@ -335,23 +335,79 @@ serve(async (req) => {
     }
 
     // ============================================================================
-    // OPTIMIZATION: Sample large files to avoid timeout (Edge Function = 60s max)
+    // BACKGROUND TASKS: Queue large files for chunked processing
     // ============================================================================
-    const MAX_ROWS = 2000; // Reduced for faster processing
+    const DIRECT_PROCESSING_LIMIT = 3000; // Process directly if under this limit
+    const CHUNK_SIZE = 1000; // Rows per chunk for background processing
+    const totalRows = Math.max(file1Rows.length, file2Rows.length);
+    
+    if (totalRows > DIRECT_PROCESSING_LIMIT) {
+      console.log(`[analyze-audit] Large file detected (${totalRows} rows), queuing for background processing`);
+      
+      // Calculate number of chunks needed
+      const numChunks = Math.ceil(totalRows / CHUNK_SIZE);
+      
+      // Create chunks in analysis_queue
+      const chunks = [];
+      for (let i = 0; i < numChunks; i++) {
+        const startRow = i * CHUNK_SIZE;
+        const endRow = Math.min((i + 1) * CHUNK_SIZE, totalRows);
+        chunks.push({
+          audit_id: auditId,
+          status: "pending",
+          chunk_index: i,
+          total_chunks: numChunks,
+          file1_start_row: Math.min(startRow, file1Rows.length),
+          file1_end_row: Math.min(endRow, file1Rows.length),
+          file2_start_row: Math.min(startRow, file2Rows.length),
+          file2_end_row: Math.min(endRow, file2Rows.length),
+        });
+      }
+      
+      // Insert all chunks
+      const { error: queueError } = await supabase.from("analysis_queue").insert(chunks);
+      
+      if (queueError) {
+        console.error("[analyze-audit] Failed to create queue:", queueError);
+        await supabase.from("audits").update({ status: "error", error_message: "Failed to queue analysis" }).eq("id", auditId);
+        return jsonResponse({ error: "Failed to queue analysis" }, 500);
+      }
+      
+      // Update audit status to queued
+      await supabase.from("audits").update({
+        status: "processing",
+        is_chunked: true,
+        chunks_total: numChunks,
+        chunks_completed: 0,
+      }).eq("id", auditId);
+      
+      console.log(`[analyze-audit] Queued ${numChunks} chunks for audit ${auditId}`);
+      
+      // Trigger first chunk processing immediately
+      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/process-chunk`;
+      fetch(edgeFunctionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${serviceRoleKey}`,
+        },
+        body: JSON.stringify({ trigger: "initial" }),
+      }).catch((err) => console.error("[analyze-audit] Failed to trigger process-chunk:", err));
+      
+      return jsonResponse({
+        success: true,
+        status: "queued",
+        message: `Large file queued for processing. ${numChunks} chunks created.`,
+        chunks: numChunks,
+      });
+    }
+    
+    // ============================================================================
+    // DIRECT PROCESSING: For files under the limit
+    // ============================================================================
     const originalFile1Count = file1Rows.length;
     const originalFile2Count = file2Rows.length;
     let samplingNote = "";
-    
-    if (file1Rows.length > MAX_ROWS) {
-      console.log(`[analyze-audit] Sampling file1: ${file1Rows.length} -> ${MAX_ROWS} rows`);
-      file1Rows = file1Rows.slice(0, MAX_ROWS);
-      samplingNote = `⚠️ Large file detected. Analyzed ${MAX_ROWS} of ${originalFile1Count} transactions. `;
-    }
-    if (file2Rows.length > MAX_ROWS) {
-      console.log(`[analyze-audit] Sampling file2: ${file2Rows.length} -> ${MAX_ROWS} rows`);
-      file2Rows = file2Rows.slice(0, MAX_ROWS);
-      samplingNote += `Stripe: ${MAX_ROWS} of ${originalFile2Count} rows.`;
-    }
     
     console.log(`[analyze-audit] Processing ${file1Rows.length} x ${file2Rows.length} rows`);
 
