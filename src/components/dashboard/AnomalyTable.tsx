@@ -57,6 +57,8 @@ const categoryLabelMap: Record<AnomalyCategory, string> = {
   missing_in_db: "Missing in DB",
   amount_mismatch: "Amount Mismatch",
   revenue_leakage: "Revenue Leakage",
+  disputed_charge: "Disputed Charge",
+  fee_discrepancy: "Fee Discrepancy",
   other: "Other",
 };
 
@@ -88,6 +90,10 @@ const categoryBadgeClass = (category: AnomalyCategory) => {
       return "bg-indigo-100 text-indigo-700 border-indigo-200";
     case "revenue_leakage":
       return "bg-pink-100 text-pink-700 border-pink-200";
+    case "disputed_charge":
+      return "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200";
+    case "fee_discrepancy":
+      return "bg-lime-100 text-lime-700 border-lime-200";
     case "other":
     default:
       return "bg-slate-100 text-slate-700 border-slate-200";

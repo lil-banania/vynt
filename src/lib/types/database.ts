@@ -20,6 +20,8 @@ export type AnomalyCategory =
   | "missing_in_db"
   | "amount_mismatch"
   | "revenue_leakage"
+  | "disputed_charge"
+  | "fee_discrepancy"
   | "other";
 export type AnomalyConfidence = "low" | "medium" | "high";
 export type UserRole =

@@ -62,6 +62,8 @@ const categoryConfig: Record<string, { label: string; color: string; icon: React
   missing_in_db: { label: "Missing in DB", color: "bg-cyan-500", icon: AlertTriangle },
   amount_mismatch: { label: "Amount Mismatch", color: "bg-indigo-500", icon: Target },
   revenue_leakage: { label: "Revenue Leakage", color: "bg-pink-500", icon: TrendingDown },
+  disputed_charge: { label: "Disputed Charge", color: "bg-fuchsia-500", icon: AlertTriangle },
+  fee_discrepancy: { label: "Fee Discrepancy", color: "bg-lime-500", icon: AlertTriangle },
   other: { label: "Other", color: "bg-slate-500", icon: AlertTriangle },
 };
 

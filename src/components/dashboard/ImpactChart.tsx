@@ -70,6 +70,14 @@ const CATEGORY_CONFIG: Record<
     label: "Revenue Leakage",
     color: "#ec4899",
   },
+  disputed_charge: {
+    label: "Disputed Charge",
+    color: "#d946ef",
+  },
+  fee_discrepancy: {
+    label: "Fee Discrepancy",
+    color: "#84cc16",
+  },
   other: {
     label: "Other",
     color: "#64748b",
