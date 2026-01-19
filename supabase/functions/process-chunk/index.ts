@@ -32,6 +32,17 @@ const STRIPE_COLUMN_HINTS: Record<string, string[]> = {
   customer_email: ["customer_email", "email", "receipt_email"],
   amount_refunded: ["amount_refunded", "refunded", "refund_amount"],
   invoice: ["invoice", "invoice_id", "inv_id"],
+  object: ["object", "type", "record_type"],
+  disputed: ["disputed", "dispute", "is_disputed"],
+};
+
+// For usage/product logs
+const USAGE_COLUMN_HINTS: Record<string, string[]> = {
+  customer_id: ["customer_id", "customer", "cust_id", "user_id", "account_id"],
+  timestamp: ["timestamp", "date", "created_at", "event_date", "time", "created"],
+  quantity: ["quantity", "amount", "count", "units", "value", "usage", "qty"],
+  event_type: ["event_type", "type", "event", "action", "category", "plan"],
+  event_id: ["event_id", "id", "uuid", "transaction_id", "record_id"],
 };
 
 type AnomalyInsert = {
@@ -169,135 +180,270 @@ serve(async (req) => {
     const file1Headers = file1Result.meta.fields ?? [];
     const file2Headers = file2Result.meta.fields ?? [];
 
-    // Get chunk slice
+    // Get chunk slice - note: we get the FULL stripe data but only a slice of usage data
+    // This is because we need to compare each usage chunk against ALL stripe records
     const file1Rows = file1Result.data.slice(chunk.file1_start_row, chunk.file1_end_row);
-    const file2Rows = file2Result.data.slice(chunk.file2_start_row, chunk.file2_end_row);
+    const file2Rows = file2Result.data; // Full Stripe data for comparison
 
-    console.log(`[process-chunk] Processing rows: file1[${chunk.file1_start_row}-${chunk.file1_end_row}], file2[${chunk.file2_start_row}-${chunk.file2_end_row}]`);
+    console.log(`[process-chunk] Processing rows: file1[${chunk.file1_start_row}-${chunk.file1_end_row}], file2[all ${file2Rows.length}]`);
 
-    // Build column mappings
-    const dbMapping: Record<string, string | null> = {};
-    for (const [key, hints] of Object.entries(DB_COLUMN_HINTS)) {
-      dbMapping[key] = findColumn(file1Headers, hints);
-    }
-
-    const stripeMapping: Record<string, string | null> = {};
-    for (const [key, hints] of Object.entries(STRIPE_COLUMN_HINTS)) {
-      stripeMapping[key] = findColumn(file2Headers, hints);
-    }
-
-    const dbRows = file1Rows.map((row) => mapRow(row as Record<string, string>, dbMapping));
-    const stripeRows = file2Rows.map((row) => mapRow(row as Record<string, string>, stripeMapping));
-
-    // Build lookup maps for Stripe data
-    const stripeByCustomerAmount = new Map<string, (typeof stripeRows)[0][]>();
-    for (const row of stripeRows) {
-      const key = `${row.customer}_${parseAmount(row.amount)}`;
-      const existing = stripeByCustomerAmount.get(key) ?? [];
-      existing.push(row);
-      stripeByCustomerAmount.set(key, existing);
-    }
+    // Determine file type: DB transaction logs vs Usage logs
+    const isDbTransactionLog = findColumn(file1Headers, ["transaction_id", "txn_id", "net_amount", "fee_amount"]) !== null;
+    console.log(`[process-chunk] File type: ${isDbTransactionLog ? "DB Transaction Log" : "Usage Log"}`);
 
     const anomalies: AnomalyInsert[] = [];
     const now = new Date().toISOString();
-    const MAX_ANOMALIES_PER_CHUNK = 30;
+    const MAX_ANOMALIES_PER_CHUNK = 50;
 
-    // ============================================================================
-    // ANOMALY DETECTION - Simplified for chunk processing
-    // ============================================================================
-
-    // 1. Missing in Stripe (DB transaction not found in Stripe)
-    let missingInStripeCount = 0;
-    for (const dbRow of dbRows) {
-      if (missingInStripeCount >= MAX_ANOMALIES_PER_CHUNK) break;
-      const customerId = dbRow.customer_id;
-      const amount = parseAmount(dbRow.amount);
-      if (!customerId || amount <= 0) continue;
-
-      const key = `${customerId}_${amount}`;
-      const matches = stripeByCustomerAmount.get(key);
-      
-      if (!matches || matches.length === 0) {
-        anomalies.push({
-          audit_id: chunk.audit_id,
-          category: "missing_in_stripe",
-          customer_id: customerId,
-          status: "open",
-          confidence: "high",
-          annual_impact: amount * 12,
-          monthly_impact: amount,
-          description: `Transaction of $${amount.toFixed(2)} for customer ${customerId} not found in Stripe`,
-          root_cause: "Transaction exists in internal records but not in Stripe export",
-          recommendation: "Verify if payment was processed or needs to be charged",
-          detected_at: now,
-          metadata: { db_transaction_id: dbRow.transaction_id, amount },
-        });
-        missingInStripeCount++;
+    if (isDbTransactionLog) {
+      // ============================================================================
+      // DB TRANSACTION LOG PROCESSING
+      // ============================================================================
+      const dbMapping: Record<string, string | null> = {};
+      for (const [key, hints] of Object.entries(DB_COLUMN_HINTS)) {
+        dbMapping[key] = findColumn(file1Headers, hints);
       }
-    }
 
-    // 2. Amount mismatch (same customer, different amounts)
-    let amountMismatchCount = 0;
-    const processedCustomers = new Set<string>();
-    for (const dbRow of dbRows) {
-      if (amountMismatchCount >= MAX_ANOMALIES_PER_CHUNK) break;
-      const customerId = dbRow.customer_id;
-      if (!customerId || processedCustomers.has(customerId)) continue;
-      processedCustomers.add(customerId);
+      const stripeMapping: Record<string, string | null> = {};
+      for (const [key, hints] of Object.entries(STRIPE_COLUMN_HINTS)) {
+        stripeMapping[key] = findColumn(file2Headers, hints);
+      }
 
-      const dbAmount = parseAmount(dbRow.amount);
-      if (dbAmount <= 0) continue;
+      const dbRows = file1Rows.map((row) => mapRow(row as Record<string, string>, dbMapping));
+      const stripeRows = file2Rows.map((row) => mapRow(row as Record<string, string>, stripeMapping));
 
-      // Find any Stripe transaction for this customer
-      for (const [key, matches] of stripeByCustomerAmount) {
-        if (key.startsWith(customerId + "_")) {
-          const stripeAmount = parseAmount(matches[0].amount);
-          const diff = Math.abs(dbAmount - stripeAmount);
-          if (diff > 0.01 && diff / Math.max(dbAmount, stripeAmount) > 0.05) {
+      // Build lookup maps for Stripe data
+      const stripeByCustomerAmount = new Map<string, (typeof stripeRows)[0][]>();
+      for (const row of stripeRows) {
+        const key = `${row.customer}_${parseAmount(row.amount)}`;
+        const existing = stripeByCustomerAmount.get(key) ?? [];
+        existing.push(row);
+        stripeByCustomerAmount.set(key, existing);
+      }
+
+      // 1. Missing in Stripe (DB transaction not found in Stripe)
+      let missingInStripeCount = 0;
+      for (const dbRow of dbRows) {
+        if (missingInStripeCount >= MAX_ANOMALIES_PER_CHUNK) break;
+        const customerId = dbRow.customer_id;
+        const amount = parseAmount(dbRow.amount);
+        if (!customerId || amount <= 0) continue;
+
+        const key = `${customerId}_${amount}`;
+        const matches = stripeByCustomerAmount.get(key);
+        
+        if (!matches || matches.length === 0) {
+          anomalies.push({
+            audit_id: chunk.audit_id,
+            category: "missing_in_stripe",
+            customer_id: customerId,
+            status: "open",
+            confidence: "high",
+            annual_impact: (amount / 100) * 12,
+            monthly_impact: amount / 100,
+            description: `Transaction of $${(amount / 100).toFixed(2)} for customer ${customerId} not found in Stripe`,
+            root_cause: "Transaction exists in internal records but not in Stripe export",
+            recommendation: "Verify if payment was processed or needs to be charged",
+            detected_at: now,
+            metadata: { db_transaction_id: dbRow.transaction_id, amount },
+          });
+          missingInStripeCount++;
+        }
+      }
+
+      // 2. Failed/Incomplete transactions in Stripe
+      let failedTxnCount = 0;
+      for (const stripeRow of stripeRows) {
+        if (failedTxnCount >= MAX_ANOMALIES_PER_CHUNK) break;
+        const status = stripeRow.status?.toLowerCase();
+        if (status && ["failed", "incomplete", "canceled"].some((s) => status.includes(s))) {
+          const amount = parseAmount(stripeRow.amount);
+          if (amount > 0) {
             anomalies.push({
               audit_id: chunk.audit_id,
-              category: "amount_mismatch",
-              customer_id: customerId,
+              category: "failed_payment",
+              customer_id: stripeRow.customer || null,
               status: "open",
-              confidence: "medium",
-              annual_impact: diff * 12,
-              monthly_impact: diff,
-              description: `Amount discrepancy: DB shows $${dbAmount.toFixed(2)}, Stripe shows $${stripeAmount.toFixed(2)}`,
-              root_cause: "Amount in internal records doesn't match Stripe",
-              recommendation: "Review pricing configuration and reconcile amounts",
+              confidence: "high",
+              annual_impact: (amount / 100) * 12,
+              monthly_impact: amount / 100,
+              description: `Failed/incomplete payment of $${(amount / 100).toFixed(2)} for customer ${stripeRow.customer || "unknown"}`,
+              root_cause: `Payment status: ${status}`,
+              recommendation: "Retry payment or contact customer",
               detected_at: now,
-              metadata: { db_amount: dbAmount, stripe_amount: stripeAmount },
+              metadata: { stripe_id: stripeRow.id, status },
             });
-            amountMismatchCount++;
-            break;
+            failedTxnCount++;
           }
         }
       }
-    }
+    } else {
+      // ============================================================================
+      // USAGE LOG PROCESSING
+      // ============================================================================
+      console.log("[process-chunk] Processing as Usage Logs");
 
-    // 3. Failed/Incomplete transactions
-    let failedTxnCount = 0;
-    for (const stripeRow of stripeRows) {
-      if (failedTxnCount >= MAX_ANOMALIES_PER_CHUNK) break;
-      const status = stripeRow.status?.toLowerCase();
-      if (status && ["failed", "incomplete", "canceled"].some((s) => status.includes(s))) {
-        const amount = parseAmount(stripeRow.amount);
-        if (amount > 0) {
+      const usageMapping: Record<string, string | null> = {};
+      for (const [key, hints] of Object.entries(USAGE_COLUMN_HINTS)) {
+        usageMapping[key] = findColumn(file1Headers, hints);
+      }
+
+      const stripeMapping: Record<string, string | null> = {};
+      for (const [key, hints] of Object.entries(STRIPE_COLUMN_HINTS)) {
+        stripeMapping[key] = findColumn(file2Headers, hints);
+      }
+
+      console.log("[process-chunk] Usage mapping:", JSON.stringify(usageMapping));
+      console.log("[process-chunk] Stripe mapping:", JSON.stringify(stripeMapping));
+
+      const usageRows = file1Rows.map((row) => mapRow(row as Record<string, string>, usageMapping));
+      const stripeRows = file2Rows.map((row) => mapRow(row as Record<string, string>, stripeMapping));
+
+      // Group by customer
+      const usageByCustomer = new Map<string, typeof usageRows>();
+      for (const row of usageRows) {
+        const customerId = row.customer_id?.trim();
+        if (!customerId) continue;
+        if (!usageByCustomer.has(customerId)) usageByCustomer.set(customerId, []);
+        usageByCustomer.get(customerId)!.push(row);
+      }
+
+      const stripeByCustomer = new Map<string, typeof stripeRows>();
+      for (const row of stripeRows) {
+        const customerId = row.customer?.trim();
+        if (!customerId) continue;
+        if (!stripeByCustomer.has(customerId)) stripeByCustomer.set(customerId, []);
+        stripeByCustomer.get(customerId)!.push(row);
+      }
+
+      console.log(`[process-chunk] Found ${usageByCustomer.size} unique customers in usage chunk, ${stripeByCustomer.size} in Stripe`);
+
+      // Get all unique customer IDs from this chunk's usage data
+      const chunkCustomerIds = [...usageByCustomer.keys()];
+
+      for (const customerId of chunkCustomerIds) {
+        if (anomalies.length >= MAX_ANOMALIES_PER_CHUNK) break;
+
+        const usageEvents = usageByCustomer.get(customerId) ?? [];
+        const stripeCharges = stripeByCustomer.get(customerId) ?? [];
+
+        const succeededCharges = stripeCharges.filter((c) =>
+          c.status?.toLowerCase() === "succeeded" || c.status?.toLowerCase() === "paid"
+        );
+        const failedCharges = stripeCharges.filter((c) =>
+          c.status?.toLowerCase() === "failed"
+        );
+        const refundedCharges = stripeCharges.filter((c) =>
+          c.status?.toLowerCase() === "refunded" || Number(c.amount_refunded) > 0
+        );
+
+        const totalUsage = usageEvents.reduce((sum, e) => sum + (Number(e.quantity) || 0), 0);
+        const totalCharged = succeededCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0) / 100;
+        const totalFailed = failedCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0) / 100;
+        const totalRefunded = refundedCharges.reduce((sum, c) => sum + (Number(c.amount_refunded || c.amount) || 0), 0) / 100;
+
+        // Zombie subscription: Customer paying but no usage
+        if (succeededCharges.length > 0 && usageEvents.length === 0) {
           anomalies.push({
             audit_id: chunk.audit_id,
-            category: "failed_transaction",
-            customer_id: stripeRow.customer || null,
-            status: "open",
-            confidence: "high",
-            annual_impact: amount * 12,
-            monthly_impact: amount,
-            description: `Failed/incomplete payment of $${amount.toFixed(2)} for customer ${stripeRow.customer || "unknown"}`,
-            root_cause: `Payment status: ${status}`,
-            recommendation: "Retry payment or contact customer",
+            category: "zombie_subscription",
+            customer_id: customerId,
+            status: "detected",
+            confidence: succeededCharges.length >= 3 ? "high" : succeededCharges.length >= 2 ? "medium" : "low",
+            annual_impact: totalCharged * 12,
+            monthly_impact: totalCharged,
+            description: `Customer ${customerId} has ${succeededCharges.length} successful charge(s) totaling $${totalCharged.toFixed(2)} but zero usage events in this period.`,
+            root_cause: "Customer may have churned or suspended usage while billing continues.",
+            recommendation: "Contact customer to verify continued usage. Consider pausing subscription.",
             detected_at: now,
-            metadata: { stripe_id: stripeRow.id, status },
+            metadata: { charges: succeededCharges.length, total: totalCharged },
           });
-          failedTxnCount++;
+        }
+
+        // Unbilled usage: Customer using but not paying
+        if (usageEvents.length > 0 && succeededCharges.length === 0) {
+          const estimatedRevenue = totalUsage * 0.05; // Estimated value per unit
+          anomalies.push({
+            audit_id: chunk.audit_id,
+            category: "unbilled_usage",
+            customer_id: customerId,
+            status: "detected",
+            confidence: usageEvents.length >= 5 ? "high" : usageEvents.length >= 2 ? "medium" : "low",
+            annual_impact: estimatedRevenue * 12,
+            monthly_impact: estimatedRevenue,
+            description: `Customer ${customerId} has ${usageEvents.length} usage event(s) (${totalUsage} units) but no successful payments.`,
+            root_cause: "Billing configuration issue, missing payment method, or free trial not converted.",
+            recommendation: "Review billing setup. Implement conversion campaign for trial users.",
+            detected_at: now,
+            metadata: { events: usageEvents.length, units: totalUsage },
+          });
+        }
+
+        // Failed payments
+        if (failedCharges.length > 0) {
+          anomalies.push({
+            audit_id: chunk.audit_id,
+            category: "failed_payment",
+            customer_id: customerId,
+            status: "detected",
+            confidence: "high",
+            annual_impact: totalFailed * 12,
+            monthly_impact: totalFailed,
+            description: `Customer ${customerId} has ${failedCharges.length} failed payment(s) totaling $${totalFailed.toFixed(2)}.`,
+            root_cause: "Payment method declined, insufficient funds, or expired card.",
+            recommendation: "Implement dunning sequence. Contact customer to update payment method.",
+            detected_at: now,
+            metadata: { failedCount: failedCharges.length, totalFailed },
+          });
+        }
+
+        // High refund rate
+        if (totalRefunded > 0 && totalCharged > 0 && totalRefunded / totalCharged > 0.1) {
+          anomalies.push({
+            audit_id: chunk.audit_id,
+            category: "high_refund_rate",
+            customer_id: customerId,
+            status: "detected",
+            confidence: "medium",
+            annual_impact: totalRefunded * 12,
+            monthly_impact: totalRefunded,
+            description: `Customer ${customerId} has a ${((totalRefunded / totalCharged) * 100).toFixed(0)}% refund rate ($${totalRefunded.toFixed(2)} of $${totalCharged.toFixed(2)}).`,
+            root_cause: "Product/service issues, billing disputes, or customer dissatisfaction.",
+            recommendation: "Review customer satisfaction. Investigate root cause of refunds.",
+            detected_at: now,
+            metadata: { refundRate: totalRefunded / totalCharged, totalRefunded, totalCharged },
+          });
+        }
+      }
+
+      // Also check for customers in Stripe but not in this usage chunk (zombie detection)
+      // Only on first chunk to avoid duplicates
+      if (chunk.chunk_index === 0) {
+        for (const [customerId, stripeCharges] of stripeByCustomer) {
+          if (anomalies.length >= MAX_ANOMALIES_PER_CHUNK) break;
+          if (usageByCustomer.has(customerId)) continue; // Already processed
+
+          const succeededCharges = stripeCharges.filter((c) =>
+            c.status?.toLowerCase() === "succeeded" || c.status?.toLowerCase() === "paid"
+          );
+          
+          if (succeededCharges.length > 0) {
+            const totalCharged = succeededCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0) / 100;
+            anomalies.push({
+              audit_id: chunk.audit_id,
+              category: "zombie_subscription",
+              customer_id: customerId,
+              status: "detected",
+              confidence: succeededCharges.length >= 3 ? "high" : "medium",
+              annual_impact: totalCharged * 12,
+              monthly_impact: totalCharged,
+              description: `Customer ${customerId} has ${succeededCharges.length} charge(s) totaling $${totalCharged.toFixed(2)} but NO usage events at all.`,
+              root_cause: "Customer is paying but has completely stopped using the service.",
+              recommendation: "Reach out to customer. High churn risk.",
+              detected_at: now,
+              metadata: { charges: succeededCharges.length, total: totalCharged, source: "stripe_only" },
+            });
+          }
         }
       }
     }
