@@ -51,6 +51,13 @@ const categoryLabelMap: Record<AnomalyCategory, string> = {
   unbilled_usage: "Unbilled Usage",
   pricing_mismatch: "Pricing Mismatch",
   duplicate_charge: "Duplicate Charge",
+  failed_payment: "Failed Payment",
+  high_refund_rate: "High Refund Rate",
+  missing_in_stripe: "Missing in Stripe",
+  missing_in_db: "Missing in DB",
+  amount_mismatch: "Amount Mismatch",
+  revenue_leakage: "Revenue Leakage",
+  other: "Other",
 };
 
 const confidenceLabelMap: Record<AnomalyConfidence, string> = {
@@ -69,6 +76,19 @@ const categoryBadgeClass = (category: AnomalyCategory) => {
       return "bg-purple-100 text-purple-700 border-purple-200";
     case "duplicate_charge":
       return "bg-orange-100 text-orange-700 border-orange-200";
+    case "failed_payment":
+      return "bg-red-100 text-red-700 border-red-200";
+    case "high_refund_rate":
+      return "bg-yellow-100 text-yellow-700 border-yellow-200";
+    case "missing_in_stripe":
+      return "bg-blue-100 text-blue-700 border-blue-200";
+    case "missing_in_db":
+      return "bg-cyan-100 text-cyan-700 border-cyan-200";
+    case "amount_mismatch":
+      return "bg-indigo-100 text-indigo-700 border-indigo-200";
+    case "revenue_leakage":
+      return "bg-pink-100 text-pink-700 border-pink-200";
+    case "other":
     default:
       return "bg-slate-100 text-slate-700 border-slate-200";
   }
