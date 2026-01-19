@@ -335,6 +335,13 @@ serve(async (req) => {
     }
 
     // ============================================================================
+    // CLEANUP: Remove old queue entries and anomalies before re-running
+    // ============================================================================
+    console.log(`[analyze-audit] Cleaning up old data for audit ${auditId}`);
+    await supabase.from("analysis_queue").delete().eq("audit_id", auditId);
+    await supabase.from("anomalies").delete().eq("audit_id", auditId);
+
+    // ============================================================================
     // BACKGROUND TASKS: Queue large files for chunked processing
     // ============================================================================
     const DIRECT_PROCESSING_LIMIT = 3000; // Process directly if under this limit
