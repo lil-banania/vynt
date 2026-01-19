@@ -180,16 +180,29 @@ serve(async (req) => {
     const file1Headers = file1Result.meta.fields ?? [];
     const file2Headers = file2Result.meta.fields ?? [];
 
+    console.log(`[process-chunk] File1 headers: ${JSON.stringify(file1Headers)}`);
+    console.log(`[process-chunk] File2 headers: ${JSON.stringify(file2Headers)}`);
+    console.log(`[process-chunk] File1 total rows: ${file1Result.data.length}`);
+    console.log(`[process-chunk] File2 total rows: ${file2Result.data.length}`);
+
     // Get chunk slice - note: we get the FULL stripe data but only a slice of usage data
     // This is because we need to compare each usage chunk against ALL stripe records
     const file1Rows = file1Result.data.slice(chunk.file1_start_row, chunk.file1_end_row);
     const file2Rows = file2Result.data; // Full Stripe data for comparison
 
-    console.log(`[process-chunk] Processing rows: file1[${chunk.file1_start_row}-${chunk.file1_end_row}], file2[all ${file2Rows.length}]`);
+    console.log(`[process-chunk] Processing rows: file1[${chunk.file1_start_row}-${chunk.file1_end_row}] = ${file1Rows.length} rows, file2[all ${file2Rows.length}]`);
 
     // Determine file type: DB transaction logs vs Usage logs
     const isDbTransactionLog = findColumn(file1Headers, ["transaction_id", "txn_id", "net_amount", "fee_amount"]) !== null;
-    console.log(`[process-chunk] File type: ${isDbTransactionLog ? "DB Transaction Log" : "Usage Log"}`);
+    console.log(`[process-chunk] File type detected: ${isDbTransactionLog ? "DB Transaction Log" : "Usage Log"}`);
+    
+    // Log first row of each file for debugging
+    if (file1Rows.length > 0) {
+      console.log(`[process-chunk] First file1 row sample: ${JSON.stringify(file1Rows[0])}`);
+    }
+    if (file2Rows.length > 0) {
+      console.log(`[process-chunk] First file2 row sample: ${JSON.stringify(file2Rows[0])}`);
+    }
 
     const anomalies: AnomalyInsert[] = [];
     const now = new Date().toISOString();
@@ -317,9 +330,12 @@ serve(async (req) => {
       }
 
       console.log(`[process-chunk] Found ${usageByCustomer.size} unique customers in usage chunk, ${stripeByCustomer.size} in Stripe`);
+      console.log(`[process-chunk] Usage customers sample: ${[...usageByCustomer.keys()].slice(0, 5).join(", ")}`);
+      console.log(`[process-chunk] Stripe customers sample: ${[...stripeByCustomer.keys()].slice(0, 5).join(", ")}`);
 
       // Get all unique customer IDs from this chunk's usage data
       const chunkCustomerIds = [...usageByCustomer.keys()];
+      console.log(`[process-chunk] Processing ${chunkCustomerIds.length} customers from usage chunk`);
 
       for (const customerId of chunkCustomerIds) {
         if (anomalies.length >= MAX_ANOMALIES_PER_CHUNK) break;
@@ -327,15 +343,24 @@ serve(async (req) => {
         const usageEvents = usageByCustomer.get(customerId) ?? [];
         const stripeCharges = stripeByCustomer.get(customerId) ?? [];
 
-        const succeededCharges = stripeCharges.filter((c) =>
-          c.status?.toLowerCase() === "succeeded" || c.status?.toLowerCase() === "paid"
-        );
-        const failedCharges = stripeCharges.filter((c) =>
-          c.status?.toLowerCase() === "failed"
-        );
-        const refundedCharges = stripeCharges.filter((c) =>
-          c.status?.toLowerCase() === "refunded" || Number(c.amount_refunded) > 0
-        );
+        // Log the statuses we see for debugging
+        const uniqueStatuses = [...new Set(stripeCharges.map(c => c.status?.toLowerCase()))];
+        if (stripeCharges.length > 0 && customerId === chunkCustomerIds[0]) {
+          console.log(`[process-chunk] Stripe statuses seen: ${uniqueStatuses.join(", ")}`);
+        }
+
+        const succeededCharges = stripeCharges.filter((c) => {
+          const status = c.status?.toLowerCase();
+          return status === "succeeded" || status === "paid" || status === "complete" || status === "completed";
+        });
+        const failedCharges = stripeCharges.filter((c) => {
+          const status = c.status?.toLowerCase();
+          return status === "failed" || status === "failure" || status === "declined";
+        });
+        const refundedCharges = stripeCharges.filter((c) => {
+          const status = c.status?.toLowerCase();
+          return status === "refunded" || Number(c.amount_refunded) > 0;
+        });
 
         const totalUsage = usageEvents.reduce((sum, e) => sum + (Number(e.quantity) || 0), 0);
         const totalCharged = succeededCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0) / 100;
@@ -416,16 +441,30 @@ serve(async (req) => {
         }
       }
 
-      // Also check for customers in Stripe but not in this usage chunk (zombie detection)
-      // Only on first chunk to avoid duplicates
-      if (chunk.chunk_index === 0) {
+      // For zombie detection (Stripe customers with no usage), we need to check
+      // against ALL usage data, not just this chunk. We'll do this on the LAST chunk.
+      if (chunk.chunk_index === chunk.total_chunks - 1) {
+        console.log(`[process-chunk] Last chunk - running zombie subscription detection`);
+        
+        // Re-parse full file1 to get ALL usage customers
+        const allUsageRows = file1Result.data;
+        const allUsageCustomers = new Set<string>();
+        for (const row of allUsageRows) {
+          const mapped = mapRow(row as Record<string, string>, usageMapping);
+          const custId = mapped.customer_id?.trim();
+          if (custId) allUsageCustomers.add(custId);
+        }
+        
+        console.log(`[process-chunk] Total unique usage customers: ${allUsageCustomers.size}`);
+        
         for (const [customerId, stripeCharges] of stripeByCustomer) {
           if (anomalies.length >= MAX_ANOMALIES_PER_CHUNK) break;
-          if (usageByCustomer.has(customerId)) continue; // Already processed
+          if (allUsageCustomers.has(customerId)) continue; // Has usage, skip
 
-          const succeededCharges = stripeCharges.filter((c) =>
-            c.status?.toLowerCase() === "succeeded" || c.status?.toLowerCase() === "paid"
-          );
+          const succeededCharges = stripeCharges.filter((c) => {
+            const status = c.status?.toLowerCase();
+            return status === "succeeded" || status === "paid" || status === "complete" || status === "completed";
+          });
           
           if (succeededCharges.length > 0) {
             const totalCharged = succeededCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0) / 100;
