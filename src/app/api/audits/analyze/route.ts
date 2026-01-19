@@ -62,60 +62,51 @@ export async function POST(request: Request) {
     .update({ status: "processing", error_message: null })
     .eq("id", auditId);
 
-  // Call Edge Function with service role key for authentication
+  // Call Edge Function in fire-and-forget mode (don't await full completion)
+  // The Edge Function will update the audit status when done
   const edgeFunctionUrl = `${supabaseUrl}/functions/v1/analyze-audit`;
-  console.log("[analyze] Calling Edge Function:", edgeFunctionUrl);
+  console.log("[analyze] Triggering Edge Function:", edgeFunctionUrl);
 
-  try {
-    const response = await fetch(edgeFunctionUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${serviceRoleKey}`,
-      },
-      body: JSON.stringify({ auditId, config }),
-    });
-
-    const responseText = await response.text();
-    console.log("[analyze] Edge Function response:", response.status, responseText);
-
-    if (!response.ok) {
-      // Update audit with error but don't block the response
+  // Fire and forget - don't await the full response
+  fetch(edgeFunctionUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${serviceRoleKey}`,
+    },
+    body: JSON.stringify({ auditId, config }),
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        const responseText = await response.text().catch(() => "Unknown error");
+        console.error("[analyze] Edge Function error:", response.status, responseText);
+        // Update audit status to error
+        await adminSupabase
+          .from("audits")
+          .update({
+            status: "error",
+            error_message: `Edge Function error: ${response.status} - ${responseText}`,
+          })
+          .eq("id", auditId);
+      } else {
+        console.log("[analyze] Edge Function completed successfully");
+      }
+    })
+    .catch(async (error) => {
+      console.error("[analyze] Failed to invoke Edge Function:", error);
       await adminSupabase
         .from("audits")
-        .update({ 
-          status: "error", 
-          error_message: `Edge Function error: ${response.status} - ${responseText}` 
+        .update({
+          status: "error",
+          error_message: `Failed to call Edge Function: ${error instanceof Error ? error.message : "Unknown error"}`,
         })
         .eq("id", auditId);
-      
-      return NextResponse.json({
-        success: false,
-        error: "Analysis failed to start",
-        details: responseText,
-      }, { status: 500 });
-    }
-
-    return NextResponse.json({
-      success: true,
-      status: "processing",
-      message: "Analysis started. Check audit status for results.",
     });
-  } catch (error) {
-    console.error("[analyze] Failed to invoke Edge Function:", error);
-    
-    await adminSupabase
-      .from("audits")
-      .update({ 
-        status: "error", 
-        error_message: `Failed to call Edge Function: ${error instanceof Error ? error.message : "Unknown error"}` 
-      })
-      .eq("id", auditId);
 
-    return NextResponse.json({
-      success: false,
-      error: "Failed to start analysis",
-      details: error instanceof Error ? error.message : "Unknown error",
-    }, { status: 500 });
-  }
+  // Return immediately - the Edge Function will update the audit when done
+  return NextResponse.json({
+    success: true,
+    status: "processing",
+    message: "Analysis started. Check audit status for results.",
+  });
 }
