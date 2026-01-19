@@ -219,7 +219,12 @@ serve(async (req) => {
 
     const anomalies: AnomalyInsert[] = [];
     const now = new Date().toISOString();
-    const MAX_ANOMALIES_PER_CHUNK = 50;
+    const MAX_PER_CATEGORY = 200;
+    const categoryCounts: Record<string, number> = {};
+    const canAdd = (category: string) => (categoryCounts[category] ?? 0) < MAX_PER_CATEGORY;
+    const record = (category: string) => {
+      categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+    };
 
     if (isDbTransactionLog) {
       // ============================================================================
@@ -254,22 +259,44 @@ serve(async (req) => {
         dbByCustomerAmount.set(key, existing);
       }
 
+      const stripeByInvoice = new Map<string, (typeof stripeRows)[0][]>();
+      for (const row of stripeRows) {
+        const invoiceId = row.invoice?.trim();
+        if (!invoiceId) continue;
+        const existing = stripeByInvoice.get(invoiceId) ?? [];
+        existing.push(row);
+        stripeByInvoice.set(invoiceId, existing);
+      }
+      const dbByInvoice = new Map<string, (typeof dbRows)[0][]>();
+      for (const row of dbRows) {
+        const invoiceId = row.invoice_id?.trim();
+        if (!invoiceId) continue;
+        const existing = dbByInvoice.get(invoiceId) ?? [];
+        existing.push(row);
+        dbByInvoice.set(invoiceId, existing);
+      }
+
       const FEE_DISCREPANCY_THRESHOLD_CENTS = 100;
-      let anomalyCount = 0;
+      const getStripeMatches = (dbRow: Record<string, string>) => {
+        const invoiceId = dbRow.invoice_id?.trim();
+        if (invoiceId) return stripeByInvoice.get(invoiceId) ?? [];
+        const customerId = dbRow.customer_id?.trim();
+        const amount = parseAmount(dbRow.amount);
+        if (!customerId || amount <= 0) return [];
+        return stripeByCustomerAmount.get(`${customerId}_${amount}`) ?? [];
+      };
 
       // 1. DB transaction checks (unbilled usage, failed payments, disputed, fee discrepancies)
       for (const dbRow of dbRows) {
-        if (anomalyCount >= MAX_ANOMALIES_PER_CHUNK) break;
         const customerId = dbRow.customer_id?.trim();
         const amount = parseAmount(dbRow.amount);
         if (!customerId || amount <= 0) continue;
 
-        const key = `${customerId}_${amount}`;
-        const stripeMatches = stripeByCustomerAmount.get(key) ?? [];
+        const stripeMatches = getStripeMatches(dbRow);
         const status = dbRow.status?.toLowerCase();
 
         if (status === "failed") {
-          if (stripeMatches.length === 0) {
+          if (stripeMatches.length === 0 && canAdd("failed_payment")) {
             anomalies.push({
               audit_id: chunk.audit_id,
               category: "failed_payment",
@@ -282,18 +309,20 @@ serve(async (req) => {
               root_cause: "Failed payment attempts not recorded in Stripe export or sync issue.",
               recommendation: "Review failed payment sync and dunning workflow.",
               detected_at: now,
-              metadata: { db_transaction_id: dbRow.transaction_id, amount },
+              metadata: { db_transaction_id: dbRow.transaction_id, amount, invoice_id: dbRow.invoice_id },
             });
-            anomalyCount++;
+            record("failed_payment");
           }
           continue;
         }
 
         if (status === "disputed") {
-          const stripeMatch = stripeMatches.find(
-            (row) => row && String(row.disputed).toLowerCase() !== "true"
-          );
-          if (stripeMatch) {
+          const stripeMatch = stripeMatches.find((row) => {
+            const disputedFlag = String(row.disputed ?? "").toLowerCase();
+            const stripeStatus = row.status?.toLowerCase();
+            return disputedFlag !== "true" && (stripeStatus === "succeeded" || stripeStatus === "paid");
+          });
+          if (stripeMatch && canAdd("disputed_charge")) {
             anomalies.push({
               audit_id: chunk.audit_id,
               category: "disputed_charge",
@@ -308,33 +337,40 @@ serve(async (req) => {
               detected_at: now,
               metadata: { db_transaction_id: dbRow.transaction_id, amount, stripe_id: stripeMatch.id },
             });
-            anomalyCount++;
+            record("disputed_charge");
           }
           continue;
         }
 
         if (status === "succeeded" || status === "paid" || status === "complete" || status === "completed") {
           if (stripeMatches.length === 0) {
-            anomalies.push({
-              audit_id: chunk.audit_id,
-              category: "unbilled_usage",
-              customer_id: customerId,
-              status: "detected",
-              confidence: "high",
-              annual_impact: (amount / 100) * 12,
-              monthly_impact: amount / 100,
-              description: `DB transaction for ${customerId} ($${(amount / 100).toFixed(2)}) has no matching Stripe charge.`,
-              root_cause: "Charge missing from Stripe export or billing not captured.",
-              recommendation: "Verify Stripe charge creation and export sync.",
-              detected_at: now,
-              metadata: { db_transaction_id: dbRow.transaction_id, amount },
-            });
-            anomalyCount++;
+            if (canAdd("unbilled_usage")) {
+              anomalies.push({
+                audit_id: chunk.audit_id,
+                category: "unbilled_usage",
+                customer_id: customerId,
+                status: "detected",
+                confidence: "high",
+                annual_impact: (amount / 100) * 12,
+                monthly_impact: amount / 100,
+                description: `DB transaction for ${customerId} ($${(amount / 100).toFixed(2)}) has no matching Stripe charge.`,
+                root_cause: "Charge missing from Stripe export or billing not captured.",
+                recommendation: "Verify Stripe charge creation and export sync.",
+                detected_at: now,
+                metadata: { db_transaction_id: dbRow.transaction_id, amount, invoice_id: dbRow.invoice_id },
+              });
+              record("unbilled_usage");
+            }
           } else {
             const stripeMatch = stripeMatches[0];
             const dbFee = parseAmount(dbRow.fee_amount);
             const stripeFee = parseAmount(stripeMatch.fee);
-            if (dbFee > 0 && stripeFee > 0 && Math.abs(dbFee - stripeFee) > FEE_DISCREPANCY_THRESHOLD_CENTS) {
+            if (
+              dbFee > 0 &&
+              stripeFee > 0 &&
+              Math.abs(dbFee - stripeFee) > FEE_DISCREPANCY_THRESHOLD_CENTS &&
+              canAdd("fee_discrepancy")
+            ) {
               anomalies.push({
                 audit_id: chunk.audit_id,
                 category: "fee_discrepancy",
@@ -349,7 +385,7 @@ serve(async (req) => {
                 detected_at: now,
                 metadata: { db_fee: dbFee, stripe_fee: stripeFee, stripe_id: stripeMatch.id },
               });
-              anomalyCount++;
+              record("fee_discrepancy");
             }
           }
         }
@@ -359,12 +395,14 @@ serve(async (req) => {
       if (chunk.chunk_index === chunk.total_chunks - 1) {
         // Zombie subscriptions: Stripe charge with no matching DB transaction
         for (const stripeRow of stripeRows) {
-          if (anomalyCount >= MAX_ANOMALIES_PER_CHUNK) break;
+          if (!canAdd("zombie_subscription")) continue;
           const status = stripeRow.status?.toLowerCase();
           if (!status || !["succeeded", "paid", "complete", "completed"].includes(status)) continue;
           const customerId = stripeRow.customer?.trim();
           const amount = parseAmount(stripeRow.amount);
           if (!customerId || amount <= 0) continue;
+          const invoiceId = stripeRow.invoice?.trim();
+          if (invoiceId && dbByInvoice.has(invoiceId)) continue;
           const key = `${customerId}_${amount}`;
           if (dbByCustomerAmount.has(key)) continue;
 
@@ -380,9 +418,9 @@ serve(async (req) => {
             root_cause: "Stripe charge exists without corresponding internal record.",
             recommendation: "Verify internal billing ingestion pipeline.",
             detected_at: now,
-            metadata: { stripe_id: stripeRow.id, amount },
+            metadata: { stripe_id: stripeRow.id, amount, invoice_id: stripeRow.invoice },
           });
-          anomalyCount++;
+          record("zombie_subscription");
         }
 
         // Duplicate charges in Stripe (same customer, amount, and day)
@@ -401,7 +439,7 @@ serve(async (req) => {
           stripeDuplicates.set(key, existing);
         }
         for (const [key, rows] of stripeDuplicates) {
-          if (anomalyCount >= MAX_ANOMALIES_PER_CHUNK) break;
+          if (!canAdd("duplicate_charge")) continue;
           if (rows.length < 2) continue;
           const amount = parseAmount(rows[0].amount);
           const customerId = rows[0].customer || "unknown";
@@ -419,7 +457,7 @@ serve(async (req) => {
             detected_at: now,
             metadata: { stripe_ids: rows.map((r) => r.id).slice(0, 5), key },
           });
-          anomalyCount++;
+          record("duplicate_charge");
         }
       }
     } else {
@@ -470,7 +508,6 @@ serve(async (req) => {
       console.log(`[process-chunk] Processing ${chunkCustomerIds.length} customers from usage chunk`);
 
       for (const customerId of chunkCustomerIds) {
-        if (anomalies.length >= MAX_ANOMALIES_PER_CHUNK) break;
 
         const usageEvents = usageByCustomer.get(customerId) ?? [];
         const stripeCharges = stripeByCustomer.get(customerId) ?? [];
@@ -500,7 +537,7 @@ serve(async (req) => {
         const totalRefunded = refundedCharges.reduce((sum, c) => sum + (Number(c.amount_refunded || c.amount) || 0), 0) / 100;
 
         // Zombie subscription: Customer paying but no usage
-        if (succeededCharges.length > 0 && usageEvents.length === 0) {
+        if (succeededCharges.length > 0 && usageEvents.length === 0 && canAdd("zombie_subscription")) {
           anomalies.push({
             audit_id: chunk.audit_id,
             category: "zombie_subscription",
@@ -515,10 +552,11 @@ serve(async (req) => {
             detected_at: now,
             metadata: { charges: succeededCharges.length, total: totalCharged },
           });
+          record("zombie_subscription");
         }
 
         // Unbilled usage: Customer using but not paying
-        if (usageEvents.length > 0 && succeededCharges.length === 0) {
+        if (usageEvents.length > 0 && succeededCharges.length === 0 && canAdd("unbilled_usage")) {
           const estimatedRevenue = totalUsage * 0.05; // Estimated value per unit
           anomalies.push({
             audit_id: chunk.audit_id,
@@ -534,10 +572,11 @@ serve(async (req) => {
             detected_at: now,
             metadata: { events: usageEvents.length, units: totalUsage },
           });
+          record("unbilled_usage");
         }
 
         // Failed payments
-        if (failedCharges.length > 0) {
+        if (failedCharges.length > 0 && canAdd("failed_payment")) {
           anomalies.push({
             audit_id: chunk.audit_id,
             category: "failed_payment",
@@ -552,10 +591,16 @@ serve(async (req) => {
             detected_at: now,
             metadata: { failedCount: failedCharges.length, totalFailed },
           });
+          record("failed_payment");
         }
 
         // High refund rate
-        if (totalRefunded > 0 && totalCharged > 0 && totalRefunded / totalCharged > 0.1) {
+        if (
+          totalRefunded > 0 &&
+          totalCharged > 0 &&
+          totalRefunded / totalCharged > 0.1 &&
+          canAdd("high_refund_rate")
+        ) {
           anomalies.push({
             audit_id: chunk.audit_id,
             category: "high_refund_rate",
@@ -570,6 +615,7 @@ serve(async (req) => {
             detected_at: now,
             metadata: { refundRate: totalRefunded / totalCharged, totalRefunded, totalCharged },
           });
+          record("high_refund_rate");
         }
       }
 
@@ -590,7 +636,6 @@ serve(async (req) => {
         console.log(`[process-chunk] Total unique usage customers: ${allUsageCustomers.size}`);
         
         for (const [customerId, stripeCharges] of stripeByCustomer) {
-          if (anomalies.length >= MAX_ANOMALIES_PER_CHUNK) break;
           if (allUsageCustomers.has(customerId)) continue; // Has usage, skip
 
           const succeededCharges = stripeCharges.filter((c) => {
@@ -598,7 +643,7 @@ serve(async (req) => {
             return status === "succeeded" || status === "paid" || status === "complete" || status === "completed";
           });
           
-          if (succeededCharges.length > 0) {
+          if (succeededCharges.length > 0 && canAdd("zombie_subscription")) {
             const totalCharged = succeededCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0) / 100;
             anomalies.push({
               audit_id: chunk.audit_id,
@@ -614,6 +659,7 @@ serve(async (req) => {
               detected_at: now,
               metadata: { charges: succeededCharges.length, total: totalCharged, source: "stripe_only" },
             });
+            record("zombie_subscription");
           }
         }
       }
