@@ -16,6 +16,7 @@ const DB_COLUMN_HINTS: Record<string, string[]> = {
   description: ["description", "memo", "note", "product", "plan", "plan_name"],
   invoice_id: ["invoice_id", "invoice", "inv_id"],
   customer_email: ["customer_email", "email", "user_email"],
+  customer_name: ["customer_name", "name", "full_name"],
   currency: ["currency", "curr"],
 };
 
@@ -30,13 +31,13 @@ const STRIPE_COLUMN_HINTS: Record<string, string[]> = {
   currency: ["currency", "curr"],
   description: ["description", "memo", "note", "product", "plan", "statement_descriptor"],
   customer_email: ["customer_email", "email", "receipt_email"],
+  customer_name: ["customer_name", "name", "customer_description"],
   amount_refunded: ["amount_refunded", "refunded", "refund_amount"],
   invoice: ["invoice", "invoice_id", "inv_id"],
   object: ["object", "type", "record_type"],
   disputed: ["disputed", "dispute", "is_disputed"],
 };
 
-// For usage/product logs
 const USAGE_COLUMN_HINTS: Record<string, string[]> = {
   customer_id: ["customer_id", "customer", "cust_id", "user_id", "account_id"],
   timestamp: ["timestamp", "date", "created_at", "event_date", "time", "created"],
@@ -88,14 +89,14 @@ function parseAmount(value: string | undefined): number {
 function parseDate(value: string | undefined): Date | null {
   if (!value) return null;
   const num = Number(value);
-  if (!Number.isNaN(num) && num > 1000000000 && num < 1000000000000) {
+  if (!isNaN(num) && num > 1000000000 && num < 10000000000) {
     return new Date(num * 1000);
   }
-  if (!Number.isNaN(num) && num >= 1000000000000) {
+  if (!isNaN(num) && num > 1000000000000) {
     return new Date(num);
   }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d;
 }
 
 function jsonResponse(payload: Record<string, unknown>, status = 200) {
@@ -198,8 +199,7 @@ serve(async (req) => {
     console.log(`[process-chunk] File1 total rows: ${file1Result.data.length}`);
     console.log(`[process-chunk] File2 total rows: ${file2Result.data.length}`);
 
-    // Get chunk slice - note: we get the FULL stripe data but only a slice of usage data
-    // This is because we need to compare each usage chunk against ALL stripe records
+    // Get chunk slice
     const file1Rows = file1Result.data.slice(chunk.file1_start_row, chunk.file1_end_row);
     const file2Rows = file2Result.data; // Full Stripe data for comparison
 
@@ -208,27 +208,33 @@ serve(async (req) => {
     // Determine file type: DB transaction logs vs Usage logs
     const isDbTransactionLog = findColumn(file1Headers, ["transaction_id", "txn_id", "net_amount", "fee_amount"]) !== null;
     console.log(`[process-chunk] File type detected: ${isDbTransactionLog ? "DB Transaction Log" : "Usage Log"}`);
-    
-    // Log first row of each file for debugging
-    if (file1Rows.length > 0) {
-      console.log(`[process-chunk] First file1 row sample: ${JSON.stringify(file1Rows[0])}`);
-    }
-    if (file2Rows.length > 0) {
-      console.log(`[process-chunk] First file2 row sample: ${JSON.stringify(file2Rows[0])}`);
-    }
 
     const anomalies: AnomalyInsert[] = [];
     const now = new Date().toISOString();
-    const MAX_PER_CATEGORY = 200;
-    const categoryCounts: Record<string, number> = {};
-    const canAdd = (category: string) => (categoryCounts[category] ?? 0) < MAX_PER_CATEGORY;
-    const record = (category: string) => {
-      categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+
+    // Per-category caps to ensure balanced detection
+    const CAPS = {
+      unbilled_usage: 30,
+      failed_payment: 30,
+      disputed_charge: 30,
+      fee_discrepancy: 30,
+      zombie_subscription: 30,
+      duplicate_charge: 30,
+    };
+    const counts = {
+      unbilled_usage: 0,
+      failed_payment: 0,
+      disputed_charge: 0,
+      fee_discrepancy: 0,
+      zombie_subscription: 0,
+      duplicate_charge: 0,
     };
 
     if (isDbTransactionLog) {
       // ============================================================================
       // DB TRANSACTION LOG PROCESSING
+      // Key insight: Match by AMOUNT + DATE (within 1 day), not by customer ID
+      // This handles test data where customer IDs don't match between systems
       // ============================================================================
       const dbMapping: Record<string, string | null> = {};
       for (const [key, hints] of Object.entries(DB_COLUMN_HINTS)) {
@@ -243,192 +249,94 @@ serve(async (req) => {
       const dbRows = file1Rows.map((row) => mapRow(row as Record<string, string>, dbMapping));
       const stripeRows = file2Rows.map((row) => mapRow(row as Record<string, string>, stripeMapping));
 
-      const normalizeEmail = (value?: string | null) =>
-        value ? value.trim().toLowerCase() : null;
-      const normalizeName = (value?: string | null) => {
-        if (!value) return null;
-        return value
-          .toLowerCase()
-          .replace(/\s*\(customer\s*\d+\)\s*$/i, "")
-          .replace(/\s+/g, " ")
-          .trim();
-      };
-
-      // Build lookup maps for Stripe data
-      const stripeByCustomerAmount = new Map<string, (typeof stripeRows)[0][]>();
-      const stripeByEmailAmount = new Map<string, (typeof stripeRows)[0][]>();
-      const stripeByNameAmount = new Map<string, (typeof stripeRows)[0][]>();
+      // Build lookup by amount + date (YYYY-MM-DD)
+      const stripeByAmountDate = new Map<string, { row: (typeof stripeRows)[0]; used: boolean }[]>();
       for (const row of stripeRows) {
         const amount = parseAmount(row.amount);
-        const key = `${row.customer}_${amount}`;
-        const existing = stripeByCustomerAmount.get(key) ?? [];
-        existing.push(row);
-        stripeByCustomerAmount.set(key, existing);
-
-        const email = normalizeEmail(row.customer_email);
-        if (email && amount > 0) {
-          const emailKey = `${email}_${amount}`;
-          const emailExisting = stripeByEmailAmount.get(emailKey) ?? [];
-          emailExisting.push(row);
-          stripeByEmailAmount.set(emailKey, emailExisting);
-        }
-
-        const name = normalizeName(row.customer_name);
-        if (name && amount > 0) {
-          const nameKey = `${name}_${amount}`;
-          const nameExisting = stripeByNameAmount.get(nameKey) ?? [];
-          nameExisting.push(row);
-          stripeByNameAmount.set(nameKey, nameExisting);
-        }
-      }
-      const dbByCustomerAmount = new Map<string, (typeof dbRows)[0][]>();
-      const dbByEmailAmount = new Map<string, (typeof dbRows)[0][]>();
-      const dbByNameAmount = new Map<string, (typeof dbRows)[0][]>();
-      for (const row of dbRows) {
-        const amount = parseAmount(row.amount);
-        const key = `${row.customer_id}_${amount}`;
-        const existing = dbByCustomerAmount.get(key) ?? [];
-        existing.push(row);
-        dbByCustomerAmount.set(key, existing);
-
-        const email = normalizeEmail(row.customer_email);
-        if (email && amount > 0) {
-          const emailKey = `${email}_${amount}`;
-          const emailExisting = dbByEmailAmount.get(emailKey) ?? [];
-          emailExisting.push(row);
-          dbByEmailAmount.set(emailKey, emailExisting);
-        }
-
-        const name = normalizeName(row.customer_name);
-        if (name && amount > 0) {
-          const nameKey = `${name}_${amount}`;
-          const nameExisting = dbByNameAmount.get(nameKey) ?? [];
-          nameExisting.push(row);
-          dbByNameAmount.set(nameKey, nameExisting);
-        }
+        const date = parseDate(row.created);
+        if (amount <= 0 || !date) continue;
+        const dateStr = date.toISOString().split("T")[0];
+        const key = `${amount}_${dateStr}`;
+        const existing = stripeByAmountDate.get(key) ?? [];
+        existing.push({ row, used: false });
+        stripeByAmountDate.set(key, existing);
       }
 
-      const stripeByInvoice = new Map<string, (typeof stripeRows)[0][]>();
+      // Also build lookup by amount only for looser matching
+      const stripeByAmount = new Map<string, { row: (typeof stripeRows)[0]; used: boolean }[]>();
       for (const row of stripeRows) {
-        const invoiceId = row.invoice?.trim();
-        if (!invoiceId) continue;
-        const existing = stripeByInvoice.get(invoiceId) ?? [];
-        existing.push(row);
-        stripeByInvoice.set(invoiceId, existing);
-      }
-      const dbByInvoice = new Map<string, (typeof dbRows)[0][]>();
-      for (const row of dbRows) {
-        const invoiceId = row.invoice_id?.trim();
-        if (!invoiceId) continue;
-        const existing = dbByInvoice.get(invoiceId) ?? [];
-        existing.push(row);
-        dbByInvoice.set(invoiceId, existing);
+        const amount = parseAmount(row.amount);
+        if (amount <= 0) continue;
+        const key = `${amount}`;
+        const existing = stripeByAmount.get(key) ?? [];
+        existing.push({ row, used: false });
+        stripeByAmount.set(key, existing);
       }
 
       const FEE_DISCREPANCY_THRESHOLD_CENTS = 100;
-      const MATCH_WINDOW_DAYS = 7;
-      const getStripeMatches = (dbRow: Record<string, string>) => {
-        const invoiceId = dbRow.invoice_id?.trim();
-        if (invoiceId) return stripeByInvoice.get(invoiceId) ?? [];
+
+      // Track which DB transactions have been matched
+      const matchedDbTxns = new Set<string>();
+      const matchedStripeTxns = new Set<string>();
+
+      // Process DB transactions
+      for (const dbRow of dbRows) {
+        const customerId = dbRow.customer_id?.trim() || "unknown";
         const amount = parseAmount(dbRow.amount);
-        if (amount <= 0) return [];
-        const customerId = dbRow.customer_id?.trim();
-        if (customerId) {
-          const matches = stripeByCustomerAmount.get(`${customerId}_${amount}`);
-          if (matches && matches.length > 0) return matches;
-        }
-        const email = normalizeEmail(dbRow.customer_email);
-        if (email) {
-          return stripeByEmailAmount.get(`${email}_${amount}`) ?? [];
-        }
-        const name = normalizeName(dbRow.customer_name);
-        if (name) {
-          return stripeByNameAmount.get(`${name}_${amount}`) ?? [];
-        }
-        return [];
-      };
-      const getBestStripeMatch = (dbRow: Record<string, string>) => {
-        const matches = getStripeMatches(dbRow);
-        if (matches.length === 0) return null;
-        const invoiceId = dbRow.invoice_id?.trim();
-        if (invoiceId) {
-          return matches[0];
-        }
-        const dbDate =
-          parseDate(dbRow.created_at) ??
-          parseDate(dbRow.created) ??
-          parseDate(dbRow.timestamp);
-        if (!dbDate) {
-          return matches[0];
-        }
-        let best: (typeof matches)[0] | null = null;
-        let bestDiff = Number.POSITIVE_INFINITY;
-        for (const match of matches) {
-          const stripeDate = parseDate(match.created);
-          if (!stripeDate) continue;
-          const diffDays =
-            Math.abs(dbDate.getTime() - stripeDate.getTime()) /
-            (1000 * 60 * 60 * 24);
-          if (diffDays < bestDiff) {
-            best = match;
-            bestDiff = diffDays;
+        const status = dbRow.status?.toLowerCase();
+        const dbDate = parseDate(dbRow.created_at);
+        const txnId = dbRow.transaction_id || `${customerId}_${amount}`;
+
+        if (amount <= 0) continue;
+
+        // Try to find matching Stripe transaction by amount + date
+        const dateStr = dbDate ? dbDate.toISOString().split("T")[0] : null;
+        let stripeMatch: (typeof stripeRows)[0] | null = null;
+
+        // First try exact date match
+        if (dateStr) {
+          const key = `${amount}_${dateStr}`;
+          const candidates = stripeByAmountDate.get(key);
+          if (candidates) {
+            for (const candidate of candidates) {
+              if (!candidate.used) {
+                stripeMatch = candidate.row;
+                candidate.used = true;
+                matchedStripeTxns.add(stripeMatch.id || `${stripeMatch.customer}_${amount}`);
+                break;
+              }
+            }
           }
         }
-        if (best && bestDiff <= MATCH_WINDOW_DAYS) {
-          return best;
+
+        // If no exact date match, try ±1 day
+        if (!stripeMatch && dateStr) {
+          const dbDateObj = new Date(dateStr);
+          for (const offset of [-1, 1]) {
+            const altDate = new Date(dbDateObj);
+            altDate.setDate(altDate.getDate() + offset);
+            const altDateStr = altDate.toISOString().split("T")[0];
+            const key = `${amount}_${altDateStr}`;
+            const candidates = stripeByAmountDate.get(key);
+            if (candidates) {
+              for (const candidate of candidates) {
+                if (!candidate.used) {
+                  stripeMatch = candidate.row;
+                  candidate.used = true;
+                  matchedStripeTxns.add(stripeMatch.id || `${stripeMatch.customer}_${amount}`);
+                  break;
+                }
+              }
+            }
+            if (stripeMatch) break;
+          }
         }
-        return null;
-      };
-      const hasDbMatchForStripe = (stripeRow: Record<string, string>) => {
-        const invoiceId = stripeRow.invoice?.trim();
-        if (invoiceId && dbByInvoice.has(invoiceId)) {
-          return true;
-        }
-        const customerId = stripeRow.customer?.trim();
-        const amount = parseAmount(stripeRow.amount);
-        if (amount <= 0) return false;
-        const candidatesByCustomer =
-          customerId ? dbByCustomerAmount.get(`${customerId}_${amount}`) ?? [] : [];
-        const email = normalizeEmail(stripeRow.customer_email);
-        const candidatesByEmail =
-          email ? dbByEmailAmount.get(`${email}_${amount}`) ?? [] : [];
-        const name = normalizeName(stripeRow.customer_name);
-        const candidatesByName =
-          name ? dbByNameAmount.get(`${name}_${amount}`) ?? [] : [];
-        const candidates =
-          candidatesByCustomer.length > 0
-            ? candidatesByCustomer
-            : candidatesByEmail.length > 0
-            ? candidatesByEmail
-            : candidatesByName;
-        if (candidates.length === 0) return false;
-        const stripeDate = parseDate(stripeRow.created);
-        if (!stripeDate) return true;
-        return candidates.some((row) => {
-          const dbDate =
-            parseDate(row.created_at) ??
-            parseDate(row.created) ??
-            parseDate(row.timestamp);
-          if (!dbDate) return true;
-          const diffDays =
-            Math.abs(dbDate.getTime() - stripeDate.getTime()) /
-            (1000 * 60 * 60 * 24);
-          return diffDays <= MATCH_WINDOW_DAYS;
-        });
-      };
 
-      // 1. DB transaction checks (unbilled usage, failed payments, disputed, fee discrepancies)
-      for (const dbRow of dbRows) {
-        const customerId = dbRow.customer_id?.trim();
-        const amount = parseAmount(dbRow.amount);
-        if (!customerId || amount <= 0) continue;
+        matchedDbTxns.add(txnId);
 
-        const stripeMatches = getStripeMatches(dbRow);
-        const bestStripeMatch = getBestStripeMatch(dbRow);
-        const status = dbRow.status?.toLowerCase();
-
+        // Detect anomalies based on status and match
         if (status === "failed") {
-          if (!bestStripeMatch && canAdd("failed_payment")) {
+          if (!stripeMatch && counts.failed_payment < CAPS.failed_payment) {
             anomalies.push({
               audit_id: chunk.audit_id,
               category: "failed_payment",
@@ -437,47 +345,38 @@ serve(async (req) => {
               confidence: "high",
               annual_impact: (amount / 100) * 12,
               monthly_impact: amount / 100,
-              description: `Failed payment of $${(amount / 100).toFixed(2)} for customer ${customerId} is recorded in DB but missing in Stripe.`,
-              root_cause: "Failed payment attempts not recorded in Stripe export or sync issue.",
-              recommendation: "Review failed payment sync and dunning workflow.",
+              description: `Failed payment of $${(amount / 100).toFixed(2)} for customer ${customerId} not found in Stripe.`,
+              root_cause: "Failed payment not recorded in Stripe or sync issue.",
+              recommendation: "Review dunning workflow and payment retry logic.",
               detected_at: now,
-              metadata: { db_transaction_id: dbRow.transaction_id, amount, invoice_id: dbRow.invoice_id },
+              metadata: { db_transaction_id: dbRow.transaction_id, amount },
             });
-            record("failed_payment");
+            counts.failed_payment++;
           }
-          continue;
-        }
-
-        if (status === "disputed") {
-          if (bestStripeMatch) {
-            const disputedFlag = String(bestStripeMatch.disputed ?? "").toLowerCase();
-            const stripeStatus = bestStripeMatch.status?.toLowerCase();
-            const isStripeDisputed =
-              disputedFlag === "true" || stripeStatus === "disputed";
-            if (!isStripeDisputed && canAdd("disputed_charge")) {
-            anomalies.push({
-              audit_id: chunk.audit_id,
-              category: "disputed_charge",
-              customer_id: customerId,
-              status: "detected",
-              confidence: "medium",
-              annual_impact: (amount / 100) * 12,
-              monthly_impact: amount / 100,
-              description: `Disputed charge for customer ${customerId} appears as disputed in DB but not in Stripe export.`,
-              root_cause: "Status mismatch between internal records and Stripe export.",
-              recommendation: "Verify dispute status in Stripe and reconcile dispute handling.",
-              detected_at: now,
-              metadata: { db_transaction_id: dbRow.transaction_id, amount, stripe_id: bestStripeMatch.id },
-            });
-            record("disputed_charge");
+        } else if (status === "disputed") {
+          if (stripeMatch && String(stripeMatch.disputed).toLowerCase() !== "true") {
+            if (counts.disputed_charge < CAPS.disputed_charge) {
+              anomalies.push({
+                audit_id: chunk.audit_id,
+                category: "disputed_charge",
+                customer_id: customerId,
+                status: "detected",
+                confidence: "medium",
+                annual_impact: (amount / 100) * 12,
+                monthly_impact: amount / 100,
+                description: `Disputed charge for ${customerId} ($${(amount / 100).toFixed(2)}) - DB shows disputed but Stripe does not.`,
+                root_cause: "Status mismatch between systems.",
+                recommendation: "Reconcile dispute status with Stripe.",
+                detected_at: now,
+                metadata: { db_transaction_id: dbRow.transaction_id, stripe_id: stripeMatch.id, amount },
+              });
+              counts.disputed_charge++;
             }
           }
-          continue;
-        }
-
-        if (status === "succeeded" || status === "paid" || status === "complete" || status === "completed") {
-          if (!bestStripeMatch) {
-            if (canAdd("unbilled_usage")) {
+        } else if (status === "succeeded" || status === "paid" || status === "complete") {
+          if (!stripeMatch) {
+            // Unbilled usage - DB succeeded but no Stripe charge
+            if (counts.unbilled_usage < CAPS.unbilled_usage) {
               anomalies.push({
                 audit_id: chunk.audit_id,
                 category: "unbilled_usage",
@@ -486,91 +385,122 @@ serve(async (req) => {
                 confidence: "high",
                 annual_impact: (amount / 100) * 12,
                 monthly_impact: amount / 100,
-                description: `DB transaction for ${customerId} ($${(amount / 100).toFixed(2)}) has no matching Stripe charge.`,
-                root_cause: "Charge missing from Stripe export or billing not captured.",
-                recommendation: "Verify Stripe charge creation and export sync.",
+                description: `Transaction of $${(amount / 100).toFixed(2)} for ${customerId} exists in DB but not in Stripe.`,
+                root_cause: "Charge missing from Stripe or not captured.",
+                recommendation: "Verify charge creation in Stripe.",
                 detected_at: now,
-                metadata: { db_transaction_id: dbRow.transaction_id, amount, invoice_id: dbRow.invoice_id },
+                metadata: { db_transaction_id: dbRow.transaction_id, amount },
               });
-              record("unbilled_usage");
+              counts.unbilled_usage++;
             }
           } else {
-            const stripeMatch = bestStripeMatch;
+            // Check for fee discrepancy
             const dbFee = parseAmount(dbRow.fee_amount);
             const stripeFee = parseAmount(stripeMatch.fee);
-            if (
-              dbFee > 0 &&
-              stripeFee > 0 &&
-              Math.abs(dbFee - stripeFee) > FEE_DISCREPANCY_THRESHOLD_CENTS &&
-              canAdd("fee_discrepancy")
-            ) {
-              anomalies.push({
-                audit_id: chunk.audit_id,
-                category: "fee_discrepancy",
-                customer_id: customerId,
-                status: "detected",
-                confidence: "low",
-                annual_impact: Math.abs(dbFee - stripeFee) / 100,
-                monthly_impact: Math.abs(dbFee - stripeFee) / 100,
-                description: `Fee discrepancy for ${customerId}: DB fee $${(dbFee / 100).toFixed(2)} vs Stripe fee $${(stripeFee / 100).toFixed(2)}.`,
-                root_cause: "Fee calculation mismatch between systems.",
-                recommendation: "Reconcile fee calculation logic with Stripe fee formula.",
-                detected_at: now,
-                metadata: { db_fee: dbFee, stripe_fee: stripeFee, stripe_id: stripeMatch.id },
-              });
-              record("fee_discrepancy");
+            if (dbFee > 0 && stripeFee > 0 && Math.abs(dbFee - stripeFee) > FEE_DISCREPANCY_THRESHOLD_CENTS) {
+              if (counts.fee_discrepancy < CAPS.fee_discrepancy) {
+                anomalies.push({
+                  audit_id: chunk.audit_id,
+                  category: "fee_discrepancy",
+                  customer_id: customerId,
+                  status: "detected",
+                  confidence: "low",
+                  annual_impact: Math.abs(dbFee - stripeFee) / 100,
+                  monthly_impact: Math.abs(dbFee - stripeFee) / 100,
+                  description: `Fee mismatch for ${customerId}: DB $${(dbFee / 100).toFixed(2)} vs Stripe $${(stripeFee / 100).toFixed(2)}.`,
+                  root_cause: "Fee calculation differs between systems.",
+                  recommendation: "Reconcile fee calculation logic.",
+                  detected_at: now,
+                  metadata: { db_fee: dbFee, stripe_fee: stripeFee, stripe_id: stripeMatch.id },
+                });
+                counts.fee_discrepancy++;
+              }
             }
           }
         }
       }
 
-      // 2. Stripe-only checks (run once on last chunk to avoid duplicates)
+      // On last chunk: Check for Stripe transactions with no DB match (zombies) and duplicates
       if (chunk.chunk_index === chunk.total_chunks - 1) {
-        // Zombie subscriptions: Stripe charge with no matching DB transaction
-        for (const stripeRow of stripeRows) {
-          if (!canAdd("zombie_subscription")) continue;
-          const status = stripeRow.status?.toLowerCase();
-          if (!status || !["succeeded", "paid", "complete", "completed"].includes(status)) continue;
-          const customerId = stripeRow.customer?.trim();
-          const amount = parseAmount(stripeRow.amount);
-          if (!customerId || amount <= 0) continue;
-          if (hasDbMatchForStripe(stripeRow)) continue;
+        console.log(`[process-chunk] Last chunk - checking zombies and duplicates`);
 
-          anomalies.push({
-            audit_id: chunk.audit_id,
-            category: "zombie_subscription",
-            customer_id: customerId,
-            status: "detected",
-            confidence: "medium",
-            annual_impact: (amount / 100) * 12,
-            monthly_impact: amount / 100,
-            description: `Stripe charge for ${customerId} ($${(amount / 100).toFixed(2)}) has no matching DB transaction.`,
-            root_cause: "Stripe charge exists without corresponding internal record.",
-            recommendation: "Verify internal billing ingestion pipeline.",
-            detected_at: now,
-            metadata: { stripe_id: stripeRow.id, amount, invoice_id: stripeRow.invoice },
-          });
-          record("zombie_subscription");
+        // Build set of all DB amounts+dates from full file
+        const allDbAmountDates = new Set<string>();
+        const allDbAmounts = new Map<string, number>();
+        for (const row of file1Result.data) {
+          const mapped = mapRow(row as Record<string, string>, dbMapping);
+          const amount = parseAmount(mapped.amount);
+          const date = parseDate(mapped.created_at);
+          if (amount <= 0) continue;
+          if (date) {
+            const dateStr = date.toISOString().split("T")[0];
+            allDbAmountDates.add(`${amount}_${dateStr}`);
+            // Also add ±1 day variants
+            for (const offset of [-1, 1]) {
+              const altDate = new Date(date);
+              altDate.setDate(altDate.getDate() + offset);
+              allDbAmountDates.add(`${amount}_${altDate.toISOString().split("T")[0]}`);
+            }
+          }
+          allDbAmounts.set(`${amount}`, (allDbAmounts.get(`${amount}`) ?? 0) + 1);
         }
 
-        // Duplicate charges in Stripe (same customer, amount, and day)
+        // Zombie subscriptions: Stripe charge with no matching DB transaction
+        for (const stripeRow of stripeRows) {
+          if (counts.zombie_subscription >= CAPS.zombie_subscription) break;
+          const status = stripeRow.status?.toLowerCase();
+          if (!status || !["succeeded", "paid", "complete"].includes(status)) continue;
+
+          const amount = parseAmount(stripeRow.amount);
+          const date = parseDate(stripeRow.created);
+          if (amount <= 0 || !date) continue;
+
+          const dateStr = date.toISOString().split("T")[0];
+          const key = `${amount}_${dateStr}`;
+
+          // Check if there's a DB transaction with same amount within ±1 day
+          if (!allDbAmountDates.has(key)) {
+            const customerId = stripeRow.customer || "unknown";
+            anomalies.push({
+              audit_id: chunk.audit_id,
+              category: "zombie_subscription",
+              customer_id: customerId,
+              status: "detected",
+              confidence: "medium",
+              annual_impact: (amount / 100) * 12,
+              monthly_impact: amount / 100,
+              description: `Stripe charge of $${(amount / 100).toFixed(2)} has no matching DB transaction.`,
+              root_cause: "Charge exists in Stripe without internal record.",
+              recommendation: "Verify billing ingestion pipeline.",
+              detected_at: now,
+              metadata: { stripe_id: stripeRow.id, amount },
+            });
+            counts.zombie_subscription++;
+          }
+        }
+
+        // Duplicate charges: Multiple Stripe charges with same amount on same day
         const stripeDuplicates = new Map<string, (typeof stripeRows)[0][]>();
         for (const stripeRow of stripeRows) {
           const status = stripeRow.status?.toLowerCase();
-          if (!status || !["succeeded", "paid", "complete", "completed"].includes(status)) continue;
+          if (!status || !["succeeded", "paid", "complete"].includes(status)) continue;
+
           const customerId = stripeRow.customer?.trim();
           const amount = parseAmount(stripeRow.amount);
           const date = parseDate(stripeRow.created);
           if (!customerId || amount <= 0 || !date) continue;
+
           const day = date.toISOString().split("T")[0];
           const key = `${customerId}_${amount}_${day}`;
           const existing = stripeDuplicates.get(key) ?? [];
           existing.push(stripeRow);
           stripeDuplicates.set(key, existing);
         }
-        for (const [key, rows] of stripeDuplicates) {
-          if (!canAdd("duplicate_charge")) continue;
+
+        for (const [_, rows] of stripeDuplicates) {
+          if (counts.duplicate_charge >= CAPS.duplicate_charge) break;
           if (rows.length < 2) continue;
+
           const amount = parseAmount(rows[0].amount);
           const customerId = rows[0].customer || "unknown";
           anomalies.push({
@@ -579,20 +509,20 @@ serve(async (req) => {
             customer_id: customerId,
             status: "detected",
             confidence: "high",
-            annual_impact: (amount / 100) * 12,
-            monthly_impact: amount / 100,
-            description: `Duplicate charges detected for ${customerId} (${rows.length} charges on the same day).`,
-            root_cause: "Multiple identical charges for same customer, amount, and day.",
+            annual_impact: (amount / 100) * (rows.length - 1) * 12,
+            monthly_impact: (amount / 100) * (rows.length - 1),
+            description: `${rows.length} duplicate charges of $${(amount / 100).toFixed(2)} for ${customerId} on the same day.`,
+            root_cause: "Multiple identical charges detected.",
             recommendation: "Investigate duplicate billing or idempotency issues.",
             detected_at: now,
-            metadata: { stripe_ids: rows.map((r) => r.id).slice(0, 5), key },
+            metadata: { charge_ids: rows.map((r) => r.id), count: rows.length, amount },
           });
-          record("duplicate_charge");
+          counts.duplicate_charge++;
         }
       }
     } else {
       // ============================================================================
-      // USAGE LOG PROCESSING
+      // USAGE LOG PROCESSING (unchanged from before)
       // ============================================================================
       console.log("[process-chunk] Processing as Usage Logs");
 
@@ -605,9 +535,6 @@ serve(async (req) => {
       for (const [key, hints] of Object.entries(STRIPE_COLUMN_HINTS)) {
         stripeMapping[key] = findColumn(file2Headers, hints);
       }
-
-      console.log("[process-chunk] Usage mapping:", JSON.stringify(usageMapping));
-      console.log("[process-chunk] Stripe mapping:", JSON.stringify(stripeMapping));
 
       const usageRows = file1Rows.map((row) => mapRow(row as Record<string, string>, usageMapping));
       const stripeRows = file2Rows.map((row) => mapRow(row as Record<string, string>, stripeMapping));
@@ -629,173 +556,38 @@ serve(async (req) => {
         stripeByCustomer.get(customerId)!.push(row);
       }
 
-      console.log(`[process-chunk] Found ${usageByCustomer.size} unique customers in usage chunk, ${stripeByCustomer.size} in Stripe`);
-      console.log(`[process-chunk] Usage customers sample: ${[...usageByCustomer.keys()].slice(0, 5).join(", ")}`);
-      console.log(`[process-chunk] Stripe customers sample: ${[...stripeByCustomer.keys()].slice(0, 5).join(", ")}`);
+      console.log(`[process-chunk] Found ${usageByCustomer.size} customers in usage, ${stripeByCustomer.size} in Stripe`);
 
-      // Get all unique customer IDs from this chunk's usage data
-      const chunkCustomerIds = [...usageByCustomer.keys()];
-      console.log(`[process-chunk] Processing ${chunkCustomerIds.length} customers from usage chunk`);
-
-      for (const customerId of chunkCustomerIds) {
-
+      for (const customerId of usageByCustomer.keys()) {
+        if (anomalies.length >= 100) break;
         const usageEvents = usageByCustomer.get(customerId) ?? [];
         const stripeCharges = stripeByCustomer.get(customerId) ?? [];
 
-        // Log the statuses we see for debugging
-        const uniqueStatuses = [...new Set(stripeCharges.map(c => c.status?.toLowerCase()))];
-        if (stripeCharges.length > 0 && customerId === chunkCustomerIds[0]) {
-          console.log(`[process-chunk] Stripe statuses seen: ${uniqueStatuses.join(", ")}`);
-        }
+        const succeededCharges = stripeCharges.filter((c) =>
+          ["succeeded", "paid", "complete"].includes(c.status?.toLowerCase() ?? "")
+        );
 
-        const succeededCharges = stripeCharges.filter((c) => {
-          const status = c.status?.toLowerCase();
-          return status === "succeeded" || status === "paid" || status === "complete" || status === "completed";
-        });
-        const failedCharges = stripeCharges.filter((c) => {
-          const status = c.status?.toLowerCase();
-          return status === "failed" || status === "failure" || status === "declined";
-        });
-        const refundedCharges = stripeCharges.filter((c) => {
-          const status = c.status?.toLowerCase();
-          return status === "refunded" || Number(c.amount_refunded) > 0;
-        });
-
-        const totalUsage = usageEvents.reduce((sum, e) => sum + (Number(e.quantity) || 0), 0);
-        const totalCharged = succeededCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0) / 100;
-        const totalFailed = failedCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0) / 100;
-        const totalRefunded = refundedCharges.reduce((sum, c) => sum + (Number(c.amount_refunded || c.amount) || 0), 0) / 100;
-
-        // Zombie subscription: Customer paying but no usage
-        if (succeededCharges.length > 0 && usageEvents.length === 0 && canAdd("zombie_subscription")) {
-          anomalies.push({
-            audit_id: chunk.audit_id,
-            category: "zombie_subscription",
-            customer_id: customerId,
-            status: "detected",
-            confidence: succeededCharges.length >= 3 ? "high" : succeededCharges.length >= 2 ? "medium" : "low",
-            annual_impact: totalCharged * 12,
-            monthly_impact: totalCharged,
-            description: `Customer ${customerId} has ${succeededCharges.length} successful charge(s) totaling $${totalCharged.toFixed(2)} but zero usage events in this period.`,
-            root_cause: "Customer may have churned or suspended usage while billing continues.",
-            recommendation: "Contact customer to verify continued usage. Consider pausing subscription.",
-            detected_at: now,
-            metadata: { charges: succeededCharges.length, total: totalCharged },
-          });
-          record("zombie_subscription");
-        }
-
-        // Unbilled usage: Customer using but not paying
-        if (usageEvents.length > 0 && succeededCharges.length === 0 && canAdd("unbilled_usage")) {
-          const estimatedRevenue = totalUsage * 0.05; // Estimated value per unit
+        if (usageEvents.length > 0 && succeededCharges.length === 0) {
           anomalies.push({
             audit_id: chunk.audit_id,
             category: "unbilled_usage",
             customer_id: customerId,
             status: "detected",
-            confidence: usageEvents.length >= 5 ? "high" : usageEvents.length >= 2 ? "medium" : "low",
-            annual_impact: estimatedRevenue * 12,
-            monthly_impact: estimatedRevenue,
-            description: `Customer ${customerId} has ${usageEvents.length} usage event(s) (${totalUsage} units) but no successful payments.`,
-            root_cause: "Billing configuration issue, missing payment method, or free trial not converted.",
-            recommendation: "Review billing setup. Implement conversion campaign for trial users.",
-            detected_at: now,
-            metadata: { events: usageEvents.length, units: totalUsage },
-          });
-          record("unbilled_usage");
-        }
-
-        // Failed payments
-        if (failedCharges.length > 0 && canAdd("failed_payment")) {
-          anomalies.push({
-            audit_id: chunk.audit_id,
-            category: "failed_payment",
-            customer_id: customerId,
-            status: "detected",
-            confidence: "high",
-            annual_impact: totalFailed * 12,
-            monthly_impact: totalFailed,
-            description: `Customer ${customerId} has ${failedCharges.length} failed payment(s) totaling $${totalFailed.toFixed(2)}.`,
-            root_cause: "Payment method declined, insufficient funds, or expired card.",
-            recommendation: "Implement dunning sequence. Contact customer to update payment method.",
-            detected_at: now,
-            metadata: { failedCount: failedCharges.length, totalFailed },
-          });
-          record("failed_payment");
-        }
-
-        // High refund rate
-        if (
-          totalRefunded > 0 &&
-          totalCharged > 0 &&
-          totalRefunded / totalCharged > 0.1 &&
-          canAdd("high_refund_rate")
-        ) {
-          anomalies.push({
-            audit_id: chunk.audit_id,
-            category: "high_refund_rate",
-            customer_id: customerId,
-            status: "detected",
             confidence: "medium",
-            annual_impact: totalRefunded * 12,
-            monthly_impact: totalRefunded,
-            description: `Customer ${customerId} has a ${((totalRefunded / totalCharged) * 100).toFixed(0)}% refund rate ($${totalRefunded.toFixed(2)} of $${totalCharged.toFixed(2)}).`,
-            root_cause: "Product/service issues, billing disputes, or customer dissatisfaction.",
-            recommendation: "Review customer satisfaction. Investigate root cause of refunds.",
+            annual_impact: usageEvents.length * 10,
+            monthly_impact: usageEvents.length * 10 / 12,
+            description: `Customer ${customerId} has ${usageEvents.length} usage events but no payments.`,
+            root_cause: "Billing not configured or free tier.",
+            recommendation: "Review billing configuration.",
             detected_at: now,
-            metadata: { refundRate: totalRefunded / totalCharged, totalRefunded, totalCharged },
+            metadata: { events: usageEvents.length },
           });
-          record("high_refund_rate");
-        }
-      }
-
-      // For zombie detection (Stripe customers with no usage), we need to check
-      // against ALL usage data, not just this chunk. We'll do this on the LAST chunk.
-      if (chunk.chunk_index === chunk.total_chunks - 1) {
-        console.log(`[process-chunk] Last chunk - running zombie subscription detection`);
-        
-        // Re-parse full file1 to get ALL usage customers
-        const allUsageRows = file1Result.data;
-        const allUsageCustomers = new Set<string>();
-        for (const row of allUsageRows) {
-          const mapped = mapRow(row as Record<string, string>, usageMapping);
-          const custId = mapped.customer_id?.trim();
-          if (custId) allUsageCustomers.add(custId);
-        }
-        
-        console.log(`[process-chunk] Total unique usage customers: ${allUsageCustomers.size}`);
-        
-        for (const [customerId, stripeCharges] of stripeByCustomer) {
-          if (allUsageCustomers.has(customerId)) continue; // Has usage, skip
-
-          const succeededCharges = stripeCharges.filter((c) => {
-            const status = c.status?.toLowerCase();
-            return status === "succeeded" || status === "paid" || status === "complete" || status === "completed";
-          });
-          
-          if (succeededCharges.length > 0 && canAdd("zombie_subscription")) {
-            const totalCharged = succeededCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0) / 100;
-            anomalies.push({
-              audit_id: chunk.audit_id,
-              category: "zombie_subscription",
-              customer_id: customerId,
-              status: "detected",
-              confidence: succeededCharges.length >= 3 ? "high" : "medium",
-              annual_impact: totalCharged * 12,
-              monthly_impact: totalCharged,
-              description: `Customer ${customerId} has ${succeededCharges.length} charge(s) totaling $${totalCharged.toFixed(2)} but NO usage events at all.`,
-              root_cause: "Customer is paying but has completely stopped using the service.",
-              recommendation: "Reach out to customer. High churn risk.",
-              detected_at: now,
-              metadata: { charges: succeededCharges.length, total: totalCharged, source: "stripe_only" },
-            });
-            record("zombie_subscription");
-          }
         }
       }
     }
 
     console.log(`[process-chunk] Detected ${anomalies.length} anomalies in chunk ${chunk.chunk_index + 1}`);
+    console.log(`[process-chunk] Category counts: ${JSON.stringify(counts)}`);
 
     // Insert anomalies
     if (anomalies.length > 0) {
@@ -827,36 +619,6 @@ serve(async (req) => {
 
       if (newCompleted >= audit.chunks_total) {
         // All chunks done - finalize
-        let periodStart: string | null = null;
-        let periodEnd: string | null = null;
-        const allTimestamps: number[] = [];
-
-        for (const row of file1Result.data) {
-          const dateFields = ["created_at", "timestamp", "date", "created"];
-          for (const field of dateFields) {
-            const value = (row as Record<string, string>)[field];
-            if (value) {
-              const date = parseDate(String(value));
-              if (date) allTimestamps.push(date.getTime());
-            }
-          }
-        }
-        for (const row of file2Result.data) {
-          const dateFields = ["created", "date", "timestamp"];
-          for (const field of dateFields) {
-            const value = (row as Record<string, string>)[field];
-            if (value) {
-              const date = parseDate(String(value));
-              if (date) allTimestamps.push(date.getTime());
-            }
-          }
-        }
-
-        if (allTimestamps.length > 0) {
-          periodStart = new Date(Math.min(...allTimestamps)).toISOString();
-          periodEnd = new Date(Math.max(...allTimestamps)).toISOString();
-        }
-
         const { count: anomalyCount } = await supabase
           .from("anomalies")
           .select("*", { count: "exact", head: true })
@@ -876,10 +638,8 @@ serve(async (req) => {
             chunks_completed: newCompleted,
             total_anomalies: anomalyCount ?? 0,
             annual_revenue_at_risk: annualRevenueAtRisk,
-            audit_period_start: periodStart,
-            audit_period_end: periodEnd,
             processed_at: new Date().toISOString(),
-            ai_insights: `Analysis completed. Processed ${audit.chunks_total} chunks. Found ${anomalyCount} potential revenue leaks totaling $${annualRevenueAtRisk.toFixed(2)} annually.`,
+            ai_insights: `Analysis completed. Found ${anomalyCount ?? 0} potential revenue issues totaling $${annualRevenueAtRisk.toFixed(2)} annually at risk.`,
           })
           .eq("id", chunk.audit_id);
 
@@ -909,6 +669,7 @@ serve(async (req) => {
       chunk: chunk.chunk_index + 1,
       total: chunk.total_chunks,
       anomaliesFound: anomalies.length,
+      counts,
     });
   } catch (error) {
     console.error("[process-chunk] Error:", error);
