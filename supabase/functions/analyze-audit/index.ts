@@ -323,10 +323,10 @@ serve(async (req) => {
       return jsonResponse({ error: "CSV headers are missing." }, 400);
     }
 
-    const file1Rows = file1Result.data.filter(
+    let file1Rows = file1Result.data.filter(
       (row): row is Record<string, string> => Boolean(row) && typeof row === "object"
     );
-    const file2Rows = file2Result.data.filter(
+    let file2Rows = file2Result.data.filter(
       (row): row is Record<string, string> => Boolean(row) && typeof row === "object"
     );
 
@@ -334,9 +334,28 @@ serve(async (req) => {
       return jsonResponse({ error: "CSV files do not contain any valid rows." }, 400);
     }
 
+    // ============================================================================
+    // OPTIMIZATION: Sample large files to avoid timeout
+    // ============================================================================
+    const MAX_ROWS = 5000;
+    const isLargeFile = file1Rows.length > MAX_ROWS || file2Rows.length > MAX_ROWS;
+    let samplingNote = "";
+    
+    if (file1Rows.length > MAX_ROWS) {
+      console.log(`[analyze-audit] Sampling file1: ${file1Rows.length} -> ${MAX_ROWS} rows`);
+      file1Rows = file1Rows.slice(0, MAX_ROWS);
+      samplingNote = `Analyzed first ${MAX_ROWS} of ${file1Result.data.length} rows. `;
+    }
+    if (file2Rows.length > MAX_ROWS) {
+      console.log(`[analyze-audit] Sampling file2: ${file2Rows.length} -> ${MAX_ROWS} rows`);
+      file2Rows = file2Rows.slice(0, MAX_ROWS);
+      samplingNote += `Stripe export: first ${MAX_ROWS} of ${file2Result.data.length} rows.`;
+    }
+
     const isDbTransactionLog = findColumn(file1Headers, ["transaction_id", "txn_id", "net_amount", "fee_amount"]) !== null;
 
     const anomalies: AnomalyInsert[] = [];
+    const MAX_ANOMALIES_PER_CATEGORY = 50; // Limit anomalies per category
     const now = new Date().toISOString();
 
     if (isDbTransactionLog) {
@@ -1465,7 +1484,7 @@ Be specific and actionable. Focus on the highest-impact items. Mention specific 
       audit_period_start: periodStart,
       audit_period_end: periodEnd,
       processed_at: new Date().toISOString(),
-      ai_insights: aiInsights,
+      ai_insights: samplingNote ? `${samplingNote}\n\n${aiInsights || ""}`.trim() : aiInsights,
       error_message: null,
     };
 
