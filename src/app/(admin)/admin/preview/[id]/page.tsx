@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { Anomaly, Audit, AnomalyCategory, AnomalyConfidence } from "@/lib/types/database";
 import PublishButton from "@/components/admin/PublishButton";
 
@@ -76,7 +76,7 @@ const confidenceConfig: Record<AnomalyConfidence, { label: string; color: string
 const PreviewPage = async ({ params }: PreviewPageProps) => {
   const { id } = await params;
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const { data: audit } = await supabase
     .from("audits")

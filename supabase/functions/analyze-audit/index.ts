@@ -366,11 +366,12 @@ serve(async (req) => {
     }
 
     // ============================================================================
-    // CLEANUP: Remove old queue entries and anomalies before re-running
+    // CLEANUP: Remove old queue entries, anomalies, and matched transactions before re-running
     // ============================================================================
     console.log(`[analyze-audit] Cleaning up old data for audit ${auditId}`);
     await supabase.from("analysis_queue").delete().eq("audit_id", auditId);
     await supabase.from("anomalies").delete().eq("audit_id", auditId);
+    await supabase.from("matched_transactions").delete().eq("audit_id", auditId);
 
     // ============================================================================
     // PROCESSING STRATEGY: Direct for small files, chunked for large
