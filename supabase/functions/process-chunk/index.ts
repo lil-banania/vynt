@@ -448,8 +448,8 @@ serve(async (req) => {
             customer_id: customerId,
             status: "detected",
             confidence: "high",
-            annual_impact: (dbData.amount / 100) * 12,
-            monthly_impact: dbData.amount / 100,
+            annual_impact: dbData.amount / 100, // Single charge amount (not × 12)
+            monthly_impact: dbData.amount / 100 / 12,
             description: `${month}: $${(dbData.amount/100).toFixed(2)} usage (${dbData.transactions} txns) with zero billing.`,
             root_cause: "Database shows usage but no corresponding Stripe charge.",
             recommendation: "Issue invoice for unbilled usage.",
@@ -470,8 +470,8 @@ serve(async (req) => {
             customer_id: customerId,
             status: "detected",
             confidence: "medium",
-            annual_impact: (gap / 100) * 12,
-            monthly_impact: gap / 100,
+            annual_impact: gap / 100, // Single charge gap (not × 12)
+            monthly_impact: gap / 100 / 12,
             description: `${month}: $${(dbData.amount/100).toFixed(2)} usage vs $${(stripeBilled/100).toFixed(2)} billed (${((gap/dbData.amount)*100).toFixed(0)}% gap).`,
             root_cause: "Significant underbilling detected.",
             recommendation: "Review pricing tier and issue correction invoice.",
@@ -623,8 +623,8 @@ serve(async (req) => {
             customer_id: row.customer || null,
             status: "detected",
             confidence: "high",
-            annual_impact: (amt / 100) * 12, // Recurring charge × 12 months
-            monthly_impact: amt / 100,
+            annual_impact: amt / 100, // Single charge amount (not × 12 per TEST_DATA_README)
+            monthly_impact: amt / 100 / 12,
             description: `Customer charged $${(amt/100).toFixed(2)} in ${month} but no usage detected.`,
             root_cause: "No database activity for billing period.",
             recommendation: "Verify subscription status and usage patterns.",
