@@ -358,6 +358,9 @@ serve(async (req) => {
     // ==========================================================================
     if (chunk.chunk_index === chunk.total_chunks - 1) {
       console.log("[process-chunk] Last chunk - final detection");
+      
+      // Separate array for final anomalies (to avoid double-insert)
+      const finalAnomalies: Array<Record<string, unknown>> = [];
 
       // Get ALL matched Stripe IDs
       const { data: allMatches } = await supabase
@@ -417,7 +420,7 @@ serve(async (req) => {
         if (hasDateMatch) continue;
 
         seenZombieKeys.add(key);
-        anomalies.push({
+        finalAnomalies.push({
           audit_id: chunk.audit_id,
           category: "zombie_subscription",
           customer_id: row.customer || null,
@@ -451,7 +454,7 @@ serve(async (req) => {
         if (dupeCount >= MAX_DUPES || charges.length < 2) continue;
         const amt = parseAmount(charges[0].amount);
         const impact = (amt / 100) * (charges.length - 1);
-        anomalies.push({
+        finalAnomalies.push({
           audit_id: chunk.audit_id,
           category: "duplicate_charge",
           customer_id: charges[0].customer || null,
@@ -495,7 +498,7 @@ serve(async (req) => {
           const diff = Math.abs(dbFee - stripeFee);
           if (diff > 100) { // $1 threshold
             seenFeeKeys.add(key);
-            anomalies.push({
+            finalAnomalies.push({
               audit_id: chunk.audit_id,
               category: "fee_discrepancy",
               customer_id: mapped.customer_id || null,
@@ -516,9 +519,9 @@ serve(async (req) => {
 
       console.log(`[process-chunk] Final: ${zombieCount} zombies, ${dupeCount} dupes, ${feeCount} fee issues`);
 
-      // Insert final anomalies
-      if (anomalies.length > 0) {
-        await supabase.from("anomalies").insert(anomalies);
+      // Insert final anomalies (separate from per-chunk anomalies)
+      if (finalAnomalies.length > 0) {
+        await supabase.from("anomalies").insert(finalAnomalies);
       }
 
       // Cleanup matched_transactions
