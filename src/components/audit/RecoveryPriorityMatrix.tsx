@@ -83,8 +83,8 @@ const RecoveryPriorityMatrix = ({ tiers }: RecoveryPriorityMatrixProps) => {
                           <span className="font-medium text-slate-700">
                             {formatCustomerDisplay(
                               anomaly.customer_id,
-                              (anomaly as Record<string, unknown>).customer_name as string | undefined,
-                              (anomaly as Record<string, unknown>).customer_tier as string | undefined
+                              (anomaly as unknown as Record<string, unknown>).customer_name as string | undefined,
+                              (anomaly as unknown as Record<string, unknown>).customer_tier as string | undefined
                             )}
                           </span>
                           <span className="text-slate-500">
