@@ -178,15 +178,19 @@ serve(async (req) => {
       stripeByAmount.get(key)!.push(row);
     }
 
-    // Process anomalies
-    const anomalies: Array<Record<string, unknown>> = [];
+    // Process anomalies - collect ALL potential anomalies first, then sort by impact
+    const potentialAnomalies: {
+      category: string;
+      data: Record<string, unknown>;
+      impact: number;
+    }[] = [];
     const newMatches: Array<{ audit_id: string; stripe_id: string; db_transaction_id: string }> = [];
     const now = new Date().toISOString();
 
     // Caps per TEST_DATA_README.md
     const caps = { failed: 40, unbilled: 35, disputed: 15 };
     
-    // Get current counts
+    // Get current counts from previous chunks
     const { count: existingFailed } = await supabase
       .from("anomalies").select("*", { count: "exact", head: true })
       .eq("audit_id", chunk.audit_id).eq("category", "failed_payment");
@@ -197,14 +201,39 @@ serve(async (req) => {
       .from("anomalies").select("*", { count: "exact", head: true })
       .eq("audit_id", chunk.audit_id).eq("category", "disputed_charge");
 
-    const counts = {
+    const existingCounts = {
       failed: existingFailed ?? 0,
       unbilled: existingUnbilled ?? 0,
       disputed: existingDisputed ?? 0,
     };
 
     const DATE_WINDOW_DAYS = 2; // Match within ±2 days (tightened for better accuracy)
+
+    // Helper to find best match with date preference
+    const findBestMatch = (cands: typeof stripeRows[0][], dbDate: Date | null) => {
+      let bestMatch: typeof stripeRows[0] | null = null;
+      let bestDateDiff = Infinity;
+      
+      for (const c of cands) {
+        if (c.object === "refund") continue;
+        if (c.status?.toLowerCase() !== "succeeded") continue;
+        if (c.id && matchedStripeIds.has(c.id)) continue;
+        
+        const stripeDate = parseDate(c.created);
+        if (!isWithinDays(dbDate, stripeDate, DATE_WINDOW_DAYS)) continue;
+        
+        const diff = dbDate && stripeDate 
+          ? Math.abs(dbDate.getTime() - stripeDate.getTime()) 
+          : 0;
+        if (diff < bestDateDiff) {
+          bestDateDiff = diff;
+          bestMatch = c;
+        }
+      }
+      return bestMatch;
+    };
     
+    // PHASE 1: Collect ALL potential anomalies (no caps yet)
     for (const dbRow of dbRows) {
       const status = dbRow.status?.toLowerCase();
       const amount = parseAmount(dbRow.amount);
@@ -216,56 +245,34 @@ serve(async (req) => {
       const candidates = stripeByCustomerAmount.get(key) ?? [];
       const amountDollars = amount / 100;
 
-      // Helper to find best match with date preference
-      const findBestMatch = (cands: typeof stripeRows[0][]) => {
-        let bestMatch: typeof stripeRows[0] | null = null;
-        let bestDateDiff = Infinity;
-        
-        for (const c of cands) {
-          if (c.object === "refund") continue;
-          if (c.status?.toLowerCase() !== "succeeded") continue;
-          if (c.id && matchedStripeIds.has(c.id)) continue;
-          
-          const stripeDate = parseDate(c.created);
-          if (!isWithinDays(dbDate, stripeDate, DATE_WINDOW_DAYS)) continue;
-          
-          // Prefer closest date
-          const diff = dbDate && stripeDate 
-            ? Math.abs(dbDate.getTime() - stripeDate.getTime()) 
-            : 0;
-          if (diff < bestDateDiff) {
-            bestDateDiff = diff;
-            bestMatch = c;
-          }
-        }
-        return bestMatch;
-      };
-
-      if (status === "failed" && counts.failed < caps.failed) {
+      if (status === "failed") {
         // For failed: check if ANY matching charge exists (by customer+amount)
         const hasMatch = candidates.some(c => 
           c.status?.toLowerCase() === "succeeded" || c.status?.toLowerCase() === "failed"
         );
         if (!hasMatch) {
-          anomalies.push({
-            audit_id: chunk.audit_id,
+          potentialAnomalies.push({
             category: "failed_payment",
-            customer_id: dbRow.customer_id || null,
-            status: "detected",
-            confidence: "high",
-            annual_impact: amountDollars,
-            monthly_impact: amountDollars / 12,
-            description: `Failed payment of $${amountDollars.toFixed(2)} not in Stripe.`,
-            root_cause: "Payment not recorded in Stripe.",
-            recommendation: "Review dunning workflow.",
-            detected_at: now,
-            metadata: { amount },
+            impact: amountDollars,
+            data: {
+              audit_id: chunk.audit_id,
+              category: "failed_payment",
+              customer_id: dbRow.customer_id || null,
+              status: "detected",
+              confidence: "high",
+              annual_impact: amountDollars,
+              monthly_impact: amountDollars / 12,
+              description: `Failed payment of $${amountDollars.toFixed(2)} not in Stripe.`,
+              root_cause: "Payment not recorded in Stripe.",
+              recommendation: "Review dunning workflow.",
+              detected_at: now,
+              metadata: { amount },
+            }
           });
-          counts.failed++;
         }
       } else if (status === "succeeded" || status === "paid") {
         // Strategy 1: Match by normalized customer + amount + date window
-        let match = findBestMatch(candidates);
+        let match = findBestMatch(candidates, dbDate);
         
         // Strategy 2: Fallback to amount + SAME DAY only (strict for better accuracy)
         if (!match && dbDate) {
@@ -279,7 +286,6 @@ serve(async (req) => {
             if (c.id && matchedStripeIds.has(c.id)) continue;
             
             const stripeDate = parseDate(c.created);
-            // Strict: ±1 day for amount-only fallback (prefer same day)
             if (isWithinDays(dbDate, stripeDate, 1)) {
               const diff = stripeDate ? Math.abs(dbDate.getTime() - stripeDate.getTime()) : 0;
               if (diff < bestFallbackDiff) {
@@ -298,46 +304,71 @@ serve(async (req) => {
             stripe_id: match.id,
             db_transaction_id: dbRow.transaction_id || "",
           });
-        } else if (counts.unbilled < caps.unbilled) {
-          anomalies.push({
-            audit_id: chunk.audit_id,
+        } else {
+          potentialAnomalies.push({
             category: "unbilled_usage",
-            customer_id: dbRow.customer_id || null,
-            status: "detected",
-            confidence: "high",
-            annual_impact: amountDollars,
-            monthly_impact: amountDollars / 12,
-            description: `Transaction of $${amountDollars.toFixed(2)} not in Stripe.`,
-            root_cause: "Charge missing from Stripe.",
-            recommendation: "Verify Stripe charge creation.",
-            detected_at: now,
-            metadata: { amount },
+            impact: amountDollars,
+            data: {
+              audit_id: chunk.audit_id,
+              category: "unbilled_usage",
+              customer_id: dbRow.customer_id || null,
+              status: "detected",
+              confidence: "high",
+              annual_impact: amountDollars,
+              monthly_impact: amountDollars / 12,
+              description: `Transaction of $${amountDollars.toFixed(2)} not in Stripe.`,
+              root_cause: "Charge missing from Stripe.",
+              recommendation: "Verify Stripe charge creation.",
+              detected_at: now,
+              metadata: { amount },
+            }
           });
-          counts.unbilled++;
         }
-      } else if (status === "disputed" && counts.disputed < caps.disputed) {
+      } else if (status === "disputed") {
         const match = candidates.find(c =>
           c.status?.toLowerCase() === "succeeded" &&
           String(c.disputed).toLowerCase() !== "true"
         );
         if (match) {
           if (match.id) matchedStripeIds.add(match.id);
-          anomalies.push({
-            audit_id: chunk.audit_id,
+          potentialAnomalies.push({
             category: "disputed_charge",
-            customer_id: dbRow.customer_id || null,
-            status: "detected",
-            confidence: "medium",
-            annual_impact: amountDollars,
-            monthly_impact: amountDollars / 12,
-            description: `Disputed charge of $${amountDollars.toFixed(2)} - mismatch with Stripe.`,
-            root_cause: "Status mismatch between systems.",
-            recommendation: "Reconcile dispute status.",
-            detected_at: now,
-            metadata: { amount },
+            impact: amountDollars,
+            data: {
+              audit_id: chunk.audit_id,
+              category: "disputed_charge",
+              customer_id: dbRow.customer_id || null,
+              status: "detected",
+              confidence: "medium",
+              annual_impact: amountDollars,
+              monthly_impact: amountDollars / 12,
+              description: `Disputed charge of $${amountDollars.toFixed(2)} - mismatch with Stripe.`,
+              root_cause: "Status mismatch between systems.",
+              recommendation: "Reconcile dispute status.",
+              detected_at: now,
+              metadata: { amount },
+            }
           });
-          counts.disputed++;
         }
+      }
+    }
+
+    // PHASE 2: Sort by impact (highest first) and apply caps
+    potentialAnomalies.sort((a, b) => b.impact - a.impact);
+    
+    const anomalies: Array<Record<string, unknown>> = [];
+    const counts = { ...existingCounts };
+    
+    for (const potential of potentialAnomalies) {
+      if (potential.category === "failed_payment" && counts.failed < caps.failed) {
+        anomalies.push(potential.data);
+        counts.failed++;
+      } else if (potential.category === "unbilled_usage" && counts.unbilled < caps.unbilled) {
+        anomalies.push(potential.data);
+        counts.unbilled++;
+      } else if (potential.category === "disputed_charge" && counts.disputed < caps.disputed) {
+        anomalies.push(potential.data);
+        counts.disputed++;
       }
     }
 
