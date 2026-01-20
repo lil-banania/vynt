@@ -246,7 +246,8 @@ serve(async (req) => {
       const amountDollars = amount / 100;
 
       if (status === "failed") {
-        // For failed: check if ANY matching charge exists (by customer+amount)
+        // Fix #6: Double-check failed payments logic
+        // Case 1: DB says failed, Stripe has no record → webhook failure
         const hasMatch = candidates.some(c => 
           c.status?.toLowerCase() === "succeeded" || c.status?.toLowerCase() === "failed"
         );
@@ -262,11 +263,34 @@ serve(async (req) => {
               confidence: "high",
               annual_impact: amountDollars,
               monthly_impact: amountDollars / 12,
-              description: `Failed payment of $${amountDollars.toFixed(2)} not in Stripe.`,
-              root_cause: "Payment not recorded in Stripe.",
-              recommendation: "Review dunning workflow.",
+              description: `Failed payment of $${amountDollars.toFixed(2)} not recorded in Stripe.`,
+              root_cause: "Webhook failure - Stripe payment not recorded in DB.",
+              recommendation: "Review dunning workflow and webhook delivery.",
               detected_at: now,
-              metadata: { amount },
+              metadata: { amount, db_status: "failed", stripe_status: "not_found" },
+            }
+          });
+        }
+      } else if (status === "succeeded" || status === "paid") {
+        // Check for status mismatch (Case 2: DB succeeded but Stripe failed)
+        const failedInStripe = candidates.find(c => c.status?.toLowerCase() === "failed");
+        if (failedInStripe) {
+          potentialAnomalies.push({
+            category: "failed_payment",
+            impact: amountDollars,
+            data: {
+              audit_id: chunk.audit_id,
+              category: "failed_payment",
+              customer_id: dbRow.customer_id || null,
+              status: "detected",
+              confidence: "medium",
+              annual_impact: amountDollars,
+              monthly_impact: amountDollars / 12,
+              description: `Status mismatch: DB shows success but Stripe shows failure ($${amountDollars.toFixed(2)}).`,
+              root_cause: "Data inconsistency - DB shows success but Stripe shows failure.",
+              recommendation: "Investigate payment processor logs and reconcile status.",
+              detected_at: now,
+              metadata: { amount, db_status: "succeeded", stripe_status: "failed" },
             }
           });
         }
@@ -353,13 +377,121 @@ serve(async (req) => {
       }
     }
 
+    // Fix #5: Monthly-based Unbilled Detection (replace transaction-level)
+    // Remove unbilled from potentialAnomalies and detect by month instead
+    const nonUnbilledAnomalies = potentialAnomalies.filter(a => a.category !== "unbilled_usage");
+    
+    // Build monthly aggregations
+    const stripeBillingByCustomerMonth = new Map<string, number>();
+    const dbUsageByCustomerMonth = new Map<string, { amount: number; transactions: number }>();
+    
+    // Aggregate Stripe billing by customer+month
+    for (const row of stripeRows) {
+      // Fix #7-9: Handle refunds, currency, partial captures
+      if (row.object === "refund") continue;
+      if (row.refunded === "TRUE" || row.refunded === "true") continue;
+      if (row.amount_refunded && parseAmount(row.amount_refunded) > 0) continue;
+      if (row.currency && row.currency.toLowerCase() !== "usd") continue;
+      
+      if (row.status?.toLowerCase() !== "succeeded" && row.status?.toLowerCase() !== "paid") continue;
+      const date = parseDate(row.created);
+      if (!date) continue;
+      
+      const month = date.toISOString().slice(0, 7);
+      const customerId = normalizeCustomerId(row.customer);
+      const key = `${customerId}_${month}`;
+      
+      // Use amount_captured if available
+      const amount = row.amount_captured && parseAmount(row.amount_captured) < parseAmount(row.amount)
+        ? parseAmount(row.amount_captured)
+        : parseAmount(row.amount);
+      
+      stripeBillingByCustomerMonth.set(
+        key,
+        (stripeBillingByCustomerMonth.get(key) || 0) + amount
+      );
+    }
+    
+    // Aggregate DB usage by customer+month
+    for (const row of dbRows) {
+      if (row.status?.toLowerCase() !== "succeeded" && row.status?.toLowerCase() !== "paid") continue;
+      const date = parseDate(row.created_at);
+      if (!date) continue;
+      
+      const month = date.toISOString().slice(0, 7);
+      const customerId = normalizeCustomerId(row.customer_id);
+      const key = `${customerId}_${month}`;
+      const amount = parseAmount(row.amount);
+      
+      const existing = dbUsageByCustomerMonth.get(key) || { amount: 0, transactions: 0 };
+      dbUsageByCustomerMonth.set(key, {
+        amount: existing.amount + amount,
+        transactions: existing.transactions + 1
+      });
+    }
+    
+    // Detect unbilled: DB usage > 0 BUT Stripe billing = 0 (or significantly lower)
+    const unbilledAnomalies: typeof potentialAnomalies = [];
+    
+    for (const [key, dbData] of dbUsageByCustomerMonth) {
+      const stripeBilled = stripeBillingByCustomerMonth.get(key) || 0;
+      const [customerId, month] = key.split('_');
+      
+      // Case 1: Zero billing but usage exists
+      if (stripeBilled === 0 && dbData.amount > 0) {
+        unbilledAnomalies.push({
+          category: "unbilled_usage",
+          impact: dbData.amount / 100,
+          data: {
+            audit_id: chunk.audit_id,
+            category: "unbilled_usage",
+            customer_id: customerId,
+            status: "detected",
+            confidence: "high",
+            annual_impact: (dbData.amount / 100) * 12,
+            monthly_impact: dbData.amount / 100,
+            description: `${month}: $${(dbData.amount/100).toFixed(2)} usage (${dbData.transactions} txns) with zero billing.`,
+            root_cause: "Database shows usage but no corresponding Stripe charge.",
+            recommendation: "Issue invoice for unbilled usage.",
+            detected_at: now,
+            metadata: { amount: dbData.amount, month, transactions: dbData.transactions },
+          }
+        });
+      }
+      // Case 2: Significant underbilling (>20% gap)
+      else if (stripeBilled > 0 && dbData.amount > stripeBilled * 1.2) {
+        const gap = dbData.amount - stripeBilled;
+        unbilledAnomalies.push({
+          category: "unbilled_usage",
+          impact: gap / 100,
+          data: {
+            audit_id: chunk.audit_id,
+            category: "unbilled_usage",
+            customer_id: customerId,
+            status: "detected",
+            confidence: "medium",
+            annual_impact: (gap / 100) * 12,
+            monthly_impact: gap / 100,
+            description: `${month}: $${(dbData.amount/100).toFixed(2)} usage vs $${(stripeBilled/100).toFixed(2)} billed (${((gap/dbData.amount)*100).toFixed(0)}% gap).`,
+            root_cause: "Significant underbilling detected.",
+            recommendation: "Review pricing tier and issue correction invoice.",
+            detected_at: now,
+            metadata: { db_amount: dbData.amount, stripe_billed: stripeBilled, gap, month },
+          }
+        });
+      }
+    }
+    
+    // Combine all anomalies
+    const allPotentialAnomalies = [...nonUnbilledAnomalies, ...unbilledAnomalies];
+    
     // PHASE 2: Sort by impact (highest first) and apply caps
-    potentialAnomalies.sort((a, b) => b.impact - a.impact);
+    allPotentialAnomalies.sort((a, b) => b.impact - a.impact);
     
     const anomalies: Array<Record<string, unknown>> = [];
     const counts = { ...existingCounts };
     
-    for (const potential of potentialAnomalies) {
+    for (const potential of allPotentialAnomalies) {
       if (potential.category === "failed_payment" && counts.failed < caps.failed) {
         anomalies.push(potential.data);
         counts.failed++;
@@ -422,59 +554,112 @@ serve(async (req) => {
         }
       }
 
-      // Zombie detection with improved matching
+      // Fix #4: Zombie detection - Monthly Activity Check
+      // Zombie = Stripe charges customer in a month BUT customer had no activity that month
       let zombieCount = 0;
       const MAX_ZOMBIES = 25;
       const seenZombieKeys = new Set<string>(); // Avoid duplicates
       
+      // Build map: customer+month → Set of active customers
+      const activeCustomersByMonth = new Map<string, Set<string>>();
+      
+      for (const row of parsed1.data) {
+        const mapped = mapRow(row as Record<string, string>, dbMap);
+        if (!mapped.status || (mapped.status.toLowerCase() !== "succeeded" && mapped.status.toLowerCase() !== "paid")) continue;
+        
+        const date = parseDate(mapped.created_at);
+        if (!date) continue;
+        
+        const month = date.toISOString().slice(0, 7); // "2024-01"
+        const customerId = normalizeCustomerId(mapped.customer_id);
+        
+        if (!activeCustomersByMonth.has(month)) {
+          activeCustomersByMonth.set(month, new Set());
+        }
+        activeCustomersByMonth.get(month)!.add(customerId);
+      }
+      
+      // Detect zombies: Stripe charge this month BUT customer not active this month
       for (const row of stripeRows) {
         if (zombieCount >= MAX_ZOMBIES) break;
-        if (row.object === "refund" || row.status?.toLowerCase() !== "succeeded") continue;
+        
+        // Fix #7: Handle refunds
+        if (row.object === "refund") continue;
+        if (row.refunded === "TRUE" || row.refunded === "true") continue;
+        if (row.amount_refunded && parseAmount(row.amount_refunded) > 0) continue;
+        
+        // Fix #8: Skip non-USD
+        if (row.currency && row.currency.toLowerCase() !== "usd") {
+          console.log(`[process-chunk] Skipping non-USD zombie: ${row.id} (${row.currency})`);
+          continue;
+        }
+        
+        if (row.status?.toLowerCase() !== "succeeded") continue;
         if (row.id && allMatchedIds.has(row.id)) continue;
         
-        const amt = parseAmount(row.amount);
+        // Fix #9: Use amount_captured if available
+        const amt = row.amount_captured && parseAmount(row.amount_captured) < parseAmount(row.amount)
+          ? parseAmount(row.amount_captured)
+          : parseAmount(row.amount);
         if (amt <= 0) continue;
         
-        const normCust = normalizeCustomerId(row.customer);
-        const key = `${normCust}_${amt}`;
+        const stripeDate = parseDate(row.created);
+        if (!stripeDate) continue;
         
-        // Skip if already flagged this customer+amount combo
+        const month = stripeDate.toISOString().slice(0, 7);
+        const normCust = normalizeCustomerId(row.customer);
+        const key = `${normCust}_${month}`;
+        
+        // Skip if already flagged this customer+month combo
         if (seenZombieKeys.has(key)) continue;
         
-        // Check normalized customer+amount match
-        if (dbCustomerAmounts.has(key)) continue;
+        const activeThisMonth = activeCustomersByMonth.get(month) || new Set();
         
-        // Fallback: check if amount+date matches (±1 day for zombie detection - strict)
-        const stripeDate = parseDate(row.created);
-        const dbDates = dbAmountDates.get(`${amt}`) ?? [];
-        const hasDateMatch = dbDates.some(d => isWithinDays(d, stripeDate, 1));
-        if (hasDateMatch) continue;
-
-        seenZombieKeys.add(key);
-        finalAnomalies.push({
-          audit_id: chunk.audit_id,
-          category: "zombie_subscription",
-          customer_id: row.customer || null,
-          status: "detected",
-          confidence: "medium",
-          annual_impact: amt / 100,
-          monthly_impact: amt / 100 / 12,
-          description: `Stripe charge of $${(amt/100).toFixed(2)} has no DB record.`,
-          root_cause: "Active billing without product usage.",
-          recommendation: "Verify if customer should be charged.",
-          detected_at: now,
-          metadata: { stripe_id: row.id, amount: amt },
-        });
-        zombieCount++;
+        if (!activeThisMonth.has(normCust)) {
+          seenZombieKeys.add(key);
+          finalAnomalies.push({
+            audit_id: chunk.audit_id,
+            category: "zombie_subscription",
+            customer_id: row.customer || null,
+            status: "detected",
+            confidence: "high",
+            annual_impact: (amt / 100) * 12, // Recurring charge × 12 months
+            monthly_impact: amt / 100,
+            description: `Customer charged $${(amt/100).toFixed(2)} in ${month} but no usage detected.`,
+            root_cause: "No database activity for billing period.",
+            recommendation: "Verify subscription status and usage patterns.",
+            detected_at: now,
+            metadata: { stripe_id: row.id, amount: amt, billing_month: month },
+          });
+          zombieCount++;
+        }
       }
 
       // Duplicate detection
       const dupeMap = new Map<string, typeof stripeRows[0][]>();
       for (const row of stripeRows) {
-        if (row.object === "refund" || row.status?.toLowerCase() !== "succeeded") continue;
+        // Fix #7: Skip refunds
+        if (row.object === "refund") continue;
+        if (row.refunded === "TRUE" || row.refunded === "true") continue;
+        if (row.amount_refunded && parseAmount(row.amount_refunded) > 0) continue;
+        
+        // Fix #8: Skip non-USD
+        if (row.currency && row.currency.toLowerCase() !== "usd") continue;
+        
+        if (row.status?.toLowerCase() !== "succeeded") continue;
         const date = parseDate(row.created);
         if (!date) continue;
-        const key = `${row.customer}_${row.amount}_${date.toISOString().split("T")[0]}`;
+        
+        // Fix #9: Use amount_captured
+        const amt = row.amount_captured && parseAmount(row.amount_captured) < parseAmount(row.amount)
+          ? row.amount_captured
+          : row.amount;
+        
+        // Fix #1: Date normalization (already implemented)
+        const dateOnly = date.toISOString().split("T")[0];
+        const normCust = normalizeCustomerId(row.customer);
+        const key = `${normCust}_${amt}_${dateOnly}`;
+        
         if (!dupeMap.has(key)) dupeMap.set(key, []);
         dupeMap.get(key)!.push(row);
       }
@@ -527,7 +712,7 @@ serve(async (req) => {
           const dbFee = parseAmount(mapped.fee_amount);
           const stripeFee = parseAmount(match.fee);
           const diff = Math.abs(dbFee - stripeFee);
-          if (diff > 50) { // $0.50 threshold (lowered for better detection)
+          if (diff > 10) { // $0.10 threshold (Fix #2: detect micro-discrepancies)
             seenFeeKeys.add(key);
             finalAnomalies.push({
               audit_id: chunk.audit_id,
@@ -554,6 +739,30 @@ serve(async (req) => {
       if (finalAnomalies.length > 0) {
         await supabase.from("anomalies").insert(finalAnomalies);
       }
+
+      // Fix #3: Detailed logging for validation
+      const { data: allAnomalies } = await supabase
+        .from("anomalies")
+        .select("category, annual_impact")
+        .eq("audit_id", chunk.audit_id);
+      
+      const categoryCounts = allAnomalies?.reduce((acc, a) => {
+        acc[a.category] = (acc[a.category] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>) || {};
+      
+      const totalImpact = allAnomalies?.reduce((sum, a) => sum + (a.annual_impact || 0), 0) || 0;
+      
+      console.log("=== RECONCILIATION DEBUG ===");
+      console.log(`Zombies: ${categoryCounts.zombie_subscription || 0} / 25 expected`);
+      console.log(`Unbilled: ${categoryCounts.unbilled_usage || 0} / 35 expected`);
+      console.log(`Failed: ${categoryCounts.failed_payment || 0} / 40 expected`);
+      console.log(`Duplicates: ${categoryCounts.duplicate_charge || 0} / 18 expected`);
+      console.log(`Disputed: ${categoryCounts.disputed_charge || 0} / 15 expected`);
+      console.log(`Fees: ${categoryCounts.fee_discrepancy || 0} / 50 expected`);
+      console.log(`Total: ${allAnomalies?.length || 0} / 183 expected`);
+      console.log(`Total Impact: $${totalImpact.toFixed(2)} / $46,902 expected`);
+      console.log("===========================");
 
       // Cleanup matched_transactions
       await supabase.from("matched_transactions").delete().eq("audit_id", chunk.audit_id);
