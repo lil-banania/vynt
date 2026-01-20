@@ -203,7 +203,7 @@ serve(async (req) => {
       disputed: existingDisputed ?? 0,
     };
 
-    const DATE_WINDOW_DAYS = 5; // Match within ±5 days (increased for better accuracy)
+    const DATE_WINDOW_DAYS = 2; // Match within ±2 days (tightened for better accuracy)
     
     for (const dbRow of dbRows) {
       const status = dbRow.status?.toLowerCase();
@@ -267,7 +267,7 @@ serve(async (req) => {
         // Strategy 1: Match by normalized customer + amount + date window
         let match = findBestMatch(candidates);
         
-        // Strategy 2: Fallback to amount + date only (for mismatched customer IDs)
+        // Strategy 2: Fallback to amount + SAME DAY only (strict for better accuracy)
         if (!match && dbDate) {
           const amountCandidates = stripeByAmount.get(`${amount}`) ?? [];
           let bestFallback: typeof stripeRows[0] | null = null;
@@ -279,8 +279,8 @@ serve(async (req) => {
             if (c.id && matchedStripeIds.has(c.id)) continue;
             
             const stripeDate = parseDate(c.created);
-            // Wider window (±2 days) for amount-only fallback
-            if (isWithinDays(dbDate, stripeDate, 2)) {
+            // Strict: ±1 day for amount-only fallback (prefer same day)
+            if (isWithinDays(dbDate, stripeDate, 1)) {
               const diff = stripeDate ? Math.abs(dbDate.getTime() - stripeDate.getTime()) : 0;
               if (diff < bestFallbackDiff) {
                 bestFallbackDiff = diff;
@@ -413,10 +413,10 @@ serve(async (req) => {
         // Check normalized customer+amount match
         if (dbCustomerAmounts.has(key)) continue;
         
-        // Fallback: check if amount+date matches (±3 days for zombie detection)
+        // Fallback: check if amount+date matches (±1 day for zombie detection - strict)
         const stripeDate = parseDate(row.created);
         const dbDates = dbAmountDates.get(`${amt}`) ?? [];
-        const hasDateMatch = dbDates.some(d => isWithinDays(d, stripeDate, 3));
+        const hasDateMatch = dbDates.some(d => isWithinDays(d, stripeDate, 1));
         if (hasDateMatch) continue;
 
         seenZombieKeys.add(key);
@@ -496,7 +496,7 @@ serve(async (req) => {
           const dbFee = parseAmount(mapped.fee_amount);
           const stripeFee = parseAmount(match.fee);
           const diff = Math.abs(dbFee - stripeFee);
-          if (diff > 100) { // $1 threshold
+          if (diff > 50) { // $0.50 threshold (lowered for better detection)
             seenFeeKeys.add(key);
             finalAnomalies.push({
               audit_id: chunk.audit_id,

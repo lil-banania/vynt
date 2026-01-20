@@ -394,37 +394,101 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
         </section>
       )}
 
-      {/* Recommended Next Steps */}
+      {/* Recommended Next Steps - Based on ACTUAL High Priority Anomalies */}
       <section className="print:break-inside-avoid">
-        <h2 className="text-xl font-bold text-slate-900 mb-4">Recommended Next Steps</h2>
+        <h2 className="text-xl font-bold text-slate-900 mb-4">🔥 Hot Fixes Required</h2>
         
-        <div className="grid gap-4 md:grid-cols-3">
-          <div className="rounded-xl border-2 border-rose-200 bg-rose-50 p-5">
-            <h3 className="font-bold text-rose-800 mb-2">⚡ Immediate (This Week)</h3>
-            <ul className="space-y-2 text-sm text-rose-700">
-              <li>• Review top 5 anomalies with finance</li>
-              <li>• Begin recovery for high-confidence issues</li>
-              <li>• Contact at-risk customers</li>
+        {/* HIGH PRIORITY - Actual anomalies */}
+        {priorityTiers[0].anomalies.length > 0 && (
+          <div className="mb-6 rounded-xl border-2 border-rose-300 bg-rose-50 p-5">
+            <h3 className="font-bold text-rose-800 mb-3 flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-rose-600 text-xs text-white">
+                {priorityTiers[0].anomalies.length}
+              </span>
+              ⚡ IMMEDIATE ACTION (This Week) - {formatCurrency(priorityTiers[0].totalImpact)} at risk
+            </h3>
+            <ul className="space-y-3 text-sm">
+              {priorityTiers[0].anomalies.slice(0, 5).map((anomaly, idx) => (
+                <li key={anomaly.id || idx} className="flex items-start gap-2 text-rose-800">
+                  <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded bg-rose-200 text-xs font-bold">
+                    {idx + 1}
+                  </span>
+                  <div>
+                    <span className="font-semibold">
+                      {categoryConfig[anomaly.category]?.label || anomaly.category}
+                    </span>
+                    <span className="text-rose-600"> — {formatCurrency(anomaly.annual_impact)}/yr</span>
+                    <p className="text-rose-700 mt-0.5">{anomaly.recommendation || `Investigate ${formatCustomerDisplay(anomaly.customer_id, null, null)}`}</p>
+                  </div>
+                </li>
+              ))}
+              {priorityTiers[0].anomalies.length > 5 && (
+                <li className="text-rose-600 italic ml-7">
+                  + {priorityTiers[0].anomalies.length - 5} more high-priority issues
+                </li>
+              )}
             </ul>
           </div>
-          
+        )}
+
+        <div className="grid gap-4 md:grid-cols-2">
+          {/* MEDIUM PRIORITY */}
           <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-5">
-            <h3 className="font-bold text-amber-800 mb-2">📅 Short-Term (This Month)</h3>
-            <ul className="space-y-2 text-sm text-amber-700">
-              <li>• Implement real-time monitoring</li>
-              <li>• Fix billing sync issues</li>
-              <li>• Review dunning sequences</li>
-            </ul>
+            <h3 className="font-bold text-amber-800 mb-3 flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500 text-xs text-white">
+                {priorityTiers[1].anomalies.length}
+              </span>
+              📅 This Month - {formatCurrency(priorityTiers[1].totalImpact)}
+            </h3>
+            {priorityTiers[1].anomalies.length > 0 ? (
+              <ul className="space-y-2 text-sm text-amber-700">
+                {priorityTiers[1].anomalies.slice(0, 3).map((anomaly, idx) => (
+                  <li key={anomaly.id || idx}>
+                    • {categoryConfig[anomaly.category]?.label}: {formatCurrency(anomaly.annual_impact)}
+                  </li>
+                ))}
+                {priorityTiers[1].anomalies.length > 3 && (
+                  <li className="italic">+ {priorityTiers[1].anomalies.length - 3} more</li>
+                )}
+              </ul>
+            ) : (
+              <p className="text-sm text-amber-600 italic">No medium-priority issues</p>
+            )}
           </div>
           
+          {/* LOW PRIORITY */}
           <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-5">
-            <h3 className="font-bold text-emerald-800 mb-2">🎯 Long-Term (Next Quarter)</h3>
-            <ul className="space-y-2 text-sm text-emerald-700">
-              <li>• Event-driven billing architecture</li>
-              <li>• Automated reconciliation</li>
-              <li>• Continuous revenue monitoring</li>
-            </ul>
+            <h3 className="font-bold text-emerald-800 mb-3 flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-xs text-white">
+                {priorityTiers[2].anomalies.length}
+              </span>
+              🎯 Next Quarter - {formatCurrency(priorityTiers[2].totalImpact)}
+            </h3>
+            {priorityTiers[2].anomalies.length > 0 ? (
+              <ul className="space-y-2 text-sm text-emerald-700">
+                {priorityTiers[2].anomalies.slice(0, 3).map((anomaly, idx) => (
+                  <li key={anomaly.id || idx}>
+                    • {categoryConfig[anomaly.category]?.label}: {formatCurrency(anomaly.annual_impact)}
+                  </li>
+                ))}
+                {priorityTiers[2].anomalies.length > 3 && (
+                  <li className="italic">+ {priorityTiers[2].anomalies.length - 3} more</li>
+                )}
+              </ul>
+            ) : (
+              <p className="text-sm text-emerald-600 italic">No low-priority issues</p>
+            )}
           </div>
+        </div>
+
+        {/* Strategic Recommendations */}
+        <div className="mt-4 rounded-xl border border-slate-200 bg-white p-5">
+          <h3 className="font-semibold text-slate-900 mb-3">📋 Strategic Recommendations</h3>
+          <ul className="space-y-2 text-sm text-slate-700">
+            <li>• <strong>Week 1:</strong> Address all {priorityTiers[0].anomalies.length} high-priority anomalies ({formatCurrency(priorityTiers[0].totalImpact)} recovery potential)</li>
+            <li>• <strong>Week 2-4:</strong> Fix root causes for {priorityTiers[1].anomalies.length} medium-priority issues</li>
+            <li>• <strong>Ongoing:</strong> Implement real-time monitoring to prevent future leakage</li>
+          </ul>
         </div>
       </section>
 
