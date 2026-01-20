@@ -21,9 +21,11 @@ export interface PriorityTier {
 export const calculatePriorityScore = (anomaly: Anomaly): number => {
   const impact = anomaly.annual_impact ?? 0;
   
+  // Adjusted thresholds for transaction-level anomalies (not aggregate totals)
   const impactScore = 
-    impact > 40000 ? 3 : 
-    impact > 15000 ? 2 : 1;
+    impact > 500 ? 3 :   // High: > $500 (e.g., unbilled usage with overage)
+    impact > 200 ? 2 :   // Medium: > $200 (e.g., failed payments, zombies)
+    1;                   // Low: ≤ $200 (e.g., small fees, disputes)
   
   const confidenceScore = 
     anomaly.confidence === 'high' ? 3 : 
