@@ -77,6 +77,10 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
   const { id } = await params;
 
   const supabase = createAdminClient();
+  
+  if (!supabase) {
+    notFound();
+  }
 
   const { data: audit } = await supabase
     .from("audits")
