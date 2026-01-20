@@ -9,6 +9,20 @@ import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/server";
 import { Anomaly, Audit, Profile, AnomalyCategory, AnomalyConfidence } from "@/lib/types/database";
 
+// New CFO-ready components
+import FinancialImpactSummary from "@/components/audit/FinancialImpactSummary";
+import RecoveryPriorityMatrix from "@/components/audit/RecoveryPriorityMatrix";
+import IndustryBenchmark from "@/components/audit/IndustryBenchmark";
+import LeakageVelocity from "@/components/audit/LeakageVelocity";
+import EnhancedRootCause from "@/components/audit/EnhancedRootCause";
+import ConfidenceBadge from "@/components/audit/ConfidenceBadge";
+
+// Calculation utilities
+import { calculateFinancialImpact, calculateVelocity, formatCustomerDisplay } from "@/lib/audit/calculations";
+import { groupByPriority } from "@/lib/audit/prioritization";
+import { calculateBenchmark } from "@/lib/audit/benchmarking";
+import { getRootCauseTemplate } from "@/lib/audit/root-cause-templates";
+
 type AuditDetailPageProps = {
   params: Promise<{
     id: string;
@@ -18,6 +32,13 @@ type AuditDetailPageProps = {
 type Organization = {
   id: string;
   name: string;
+};
+
+type AuditWithExtras = Audit & { 
+  ai_insights?: string | null;
+  total_arr?: number | null;
+  company_vertical?: string | null;
+  previous_audit_date?: string | null;
 };
 
 const formatCurrency = (value: number | null) => {
@@ -81,10 +102,10 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
   const { data: audit } = await supabase
     .from("audits")
     .select(
-      "id, organization_id, status, audit_period_start, audit_period_end, total_anomalies, annual_revenue_at_risk, ai_insights, created_at, published_at, created_by"
+      "id, organization_id, status, audit_period_start, audit_period_end, total_anomalies, annual_revenue_at_risk, ai_insights, created_at, published_at, created_by, total_arr, company_vertical, previous_audit_date"
     )
     .eq("id", id)
-    .maybeSingle<Audit & { ai_insights?: string | null }>();
+    .maybeSingle<AuditWithExtras>();
 
   if (!audit) {
     notFound();
@@ -114,11 +135,11 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
   const { data: anomaliesData } = await supabase
     .from("anomalies")
     .select(
-      "id, audit_id, category, customer_id, status, confidence, annual_impact, monthly_impact, description, root_cause, recommendation, metadata, detected_at"
+      "id, audit_id, category, customer_id, status, confidence, annual_impact, monthly_impact, description, root_cause, recommendation, metadata, detected_at, confidence_score, customer_name, customer_tier"
     )
     .eq("audit_id", audit.id)
     .order("annual_impact", { ascending: false })
-    .returns<Anomaly[]>();
+    .returns<(Anomaly & { confidence_score?: number; customer_name?: string; customer_tier?: string })[]>();
 
   const anomalies = anomaliesData ?? [];
 
@@ -135,6 +156,27 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
 
   // Get top 5 issues by impact
   const topIssues = anomalies.slice(0, 5);
+
+  // ============================================================================
+  // CFO-READY CALCULATIONS
+  // ============================================================================
+  
+  const totalRevenueAtRisk = audit.annual_revenue_at_risk ?? 0;
+  const totalARR = audit.total_arr ?? 10_000_000; // Default to $10M ARR if not set
+  const vertical = audit.company_vertical ?? 'DevTools';
+  
+  // Financial Impact
+  const financialImpact = calculateFinancialImpact(totalRevenueAtRisk, totalARR);
+  
+  // Priority Matrix
+  const priorityTiers = groupByPriority(anomalies);
+  
+  // Industry Benchmark
+  const benchmark = calculateBenchmark(totalRevenueAtRisk, totalARR, vertical);
+  
+  // Leakage Velocity
+  const previousAuditDate = audit.previous_audit_date ? new Date(audit.previous_audit_date) : null;
+  const velocity = calculateVelocity(totalRevenueAtRisk, previousAuditDate);
 
   // Identify common patterns
   const patterns: { title: string; description: string; percentage: number }[] = [];
@@ -199,6 +241,11 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
         categoryBreakdown={categoryBreakdown}
       />
 
+      {/* 🔴 PRIORITY 1: Financial Impact Summary */}
+      <section className="print:break-inside-avoid">
+        <FinancialImpactSummary data={financialImpact} />
+      </section>
+
       {/* AI Executive Summary */}
       {audit.ai_insights && (
         <section className="print:break-inside-avoid">
@@ -214,7 +261,22 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
         </section>
       )}
 
-      {/* Top Issues Section */}
+      {/* 🟡 PRIORITY 2: Recovery Priority Matrix */}
+      <section className="print:break-inside-avoid">
+        <RecoveryPriorityMatrix tiers={priorityTiers} />
+      </section>
+
+      {/* 🟢 PRIORITY 5: Industry Benchmarking */}
+      <section className="print:break-inside-avoid">
+        <IndustryBenchmark data={benchmark} vertical={vertical} />
+      </section>
+
+      {/* 🟢 PRIORITY 6: Leakage Velocity */}
+      <section className="print:break-inside-avoid">
+        <LeakageVelocity data={velocity} />
+      </section>
+
+      {/* Top Issues Section with Enhanced Root Cause */}
       {topIssues.length > 0 && (
         <section>
           <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
@@ -222,11 +284,14 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
             Top {topIssues.length} Issues (by Financial Impact)
           </h2>
           
-          <div className="space-y-4">
+          <div className="space-y-6">
             {topIssues.map((anomaly, index) => {
               const catConfig = categoryConfig[anomaly.category] ?? categoryConfig.other;
               const confConfig = confidenceConfig[anomaly.confidence];
               const Icon = catConfig.icon;
+              const rootCause = getRootCauseTemplate(anomaly);
+              const confidenceScore = (anomaly as { confidence_score?: number }).confidence_score ?? 
+                (anomaly.confidence === 'high' ? 90 : anomaly.confidence === 'medium' ? 70 : 50);
               
               return (
                 <div key={anomaly.id} className="rounded-xl border border-slate-200 bg-white overflow-hidden print:break-inside-avoid">
@@ -243,13 +308,17 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
                         <span className="font-semibold text-slate-900">{catConfig.label}</span>
                       </div>
                       {anomaly.customer_id && (
-                        <span className="text-sm text-slate-500">— Customer #{anomaly.customer_id}</span>
+                        <span className="text-sm text-slate-500">
+                          — {formatCustomerDisplay(
+                            anomaly.customer_id,
+                            (anomaly as { customer_name?: string }).customer_name,
+                            (anomaly as { customer_tier?: string }).customer_tier
+                          )}
+                        </span>
                       )}
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${confConfig.color}`}>
-                        {confConfig.label}
-                      </span>
+                      <ConfidenceBadge score={confidenceScore} />
                       <span className="text-lg font-bold text-rose-600">
                         {formatCurrency(anomaly.annual_impact)}/yr
                       </span>
@@ -259,7 +328,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
                   {/* Issue Body */}
                   <div className="px-6 py-5 space-y-4">
                     <div>
-                      <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Status</h4>
+                      <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Description</h4>
                       <p className="text-slate-700">{anomaly.description}</p>
                     </div>
                     
@@ -276,19 +345,8 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
                       </div>
                     )}
                     
-                    {anomaly.root_cause && (
-                      <div>
-                        <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Root Cause</h4>
-                        <p className="text-slate-700">{anomaly.root_cause}</p>
-                      </div>
-                    )}
-                    
-                    {anomaly.recommendation && (
-                      <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4">
-                        <h4 className="text-xs font-semibold uppercase tracking-wider text-emerald-700 mb-1">Recommendation</h4>
-                        <p className="text-emerald-800">{anomaly.recommendation}</p>
-                      </div>
-                    )}
+                    {/* 🟢 PRIORITY 7: Enhanced Root Cause */}
+                    <EnhancedRootCause rootCause={rootCause} />
                   </div>
                 </div>
               );
@@ -342,7 +400,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
         
         <div className="grid gap-4 md:grid-cols-3">
           <div className="rounded-xl border-2 border-rose-200 bg-rose-50 p-5">
-            <h3 className="font-bold text-rose-800 mb-2">Immediate (This Week)</h3>
+            <h3 className="font-bold text-rose-800 mb-2">⚡ Immediate (This Week)</h3>
             <ul className="space-y-2 text-sm text-rose-700">
               <li>• Review top 5 anomalies with finance</li>
               <li>• Begin recovery for high-confidence issues</li>
@@ -351,7 +409,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
           </div>
           
           <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-5">
-            <h3 className="font-bold text-amber-800 mb-2">Short-Term (This Month)</h3>
+            <h3 className="font-bold text-amber-800 mb-2">📅 Short-Term (This Month)</h3>
             <ul className="space-y-2 text-sm text-amber-700">
               <li>• Implement real-time monitoring</li>
               <li>• Fix billing sync issues</li>
@@ -360,7 +418,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
           </div>
           
           <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-5">
-            <h3 className="font-bold text-emerald-800 mb-2">Long-Term (Next Quarter)</h3>
+            <h3 className="font-bold text-emerald-800 mb-2">🎯 Long-Term (Next Quarter)</h3>
             <ul className="space-y-2 text-sm text-emerald-700">
               <li>• Event-driven billing architecture</li>
               <li>• Automated reconciliation</li>
