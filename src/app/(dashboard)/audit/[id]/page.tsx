@@ -219,7 +219,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
             <ArrowLeft className="h-4 w-4" />
             All audits
           </Link>
-          <h1 className="text-3xl font-semibold text-slate-900">Your audit</h1>
+          <h1 className="text-3xl font-semibold text-slate-900">Audit Detail</h1>
         </div>
         <ExportAuditButton />
       </div>
@@ -295,48 +295,63 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="rounded-lg border border-slate-200 p-4">
-                    <p className="text-xs text-slate-500">Total Revenue at Risk</p>
-                    <p className="mt-1 text-2xl font-semibold text-rose-600">
+                <div className="flex items-stretch divide-x divide-slate-200">
+                  {/* Total Revenue at Risk */}
+                  <div className="flex-1 px-4 py-2 first:pl-0">
+                    <p className="text-sm text-slate-500">Total Revenue at Risk</p>
+                    <p className="mt-2 text-2xl font-semibold text-rose-600">
                       {formatCurrency(totalRevenueAtRisk)}
                     </p>
                     <p className="mt-1 text-xs text-slate-400">85%</p>
-                        </div>
-                  <div className="rounded-lg border border-slate-200 p-4">
-                    <p className="text-xs text-slate-500">Estimated Recoverable</p>
-                    <p className="mt-1 text-2xl font-semibold text-emerald-600">
+                  </div>
+                  
+                  {/* Estimated Recoverable */}
+                  <div className="flex-1 px-4 py-2">
+                    <p className="text-sm text-slate-500">Estimated Recoverable</p>
+                    <p className="mt-2 text-2xl font-semibold text-emerald-600">
                       {formatCurrency(estimatedRecovery)}
                     </p>
                     <p className="mt-1 text-xs text-slate-400">85%</p>
-                      </div>
-                  <div className="rounded-lg border border-slate-200 p-4">
-                    <p className="text-xs text-slate-500">Vynt Annual Cost</p>
-                    <p className="mt-1 text-2xl font-semibold text-slate-900">
+                  </div>
+                  
+                  {/* Vynt Annual Cost */}
+                  <div className="flex-1 px-4 py-2 last:pr-0">
+                    <p className="text-sm text-slate-500">Vynt Annual Cost</p>
+                    <p className="mt-2 text-2xl font-semibold text-slate-900">
                       {formatCurrency(vyntAnnualCost)}
                     </p>
                     <p className="mt-1 text-xs text-slate-400">85%</p>
-                    </div>
-                  <div className="rounded-lg border border-slate-200 p-4">
-                    <p className="text-xs text-slate-500">Net Benefit Year 1</p>
+                  </div>
+                </div>
+                
+                <div className="h-px bg-slate-200 my-4" />
+                
+                <div className="flex items-stretch divide-x divide-slate-200">
+                  {/* Net Benefit Year 1 */}
+                  <div className="flex-1 px-4 py-2 first:pl-0">
+                    <p className="text-sm text-slate-500">Net Benefit Year 1</p>
                     <p
-                      className={`mt-1 text-2xl font-semibold ${netBenefitYear1 >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+                      className={`mt-2 text-2xl font-semibold ${netBenefitYear1 >= 0 ? "text-emerald-600" : "text-rose-600"}`}
                     >
                       {formatCurrency(netBenefitYear1)}
                     </p>
-                    </div>
-                  <div className="rounded-lg border border-slate-200 p-4">
-                    <p className="text-xs text-slate-500">ROI</p>
+                  </div>
+                  
+                  {/* ROI */}
+                  <div className="flex-1 px-4 py-2">
+                    <p className="text-sm text-slate-500">ROI</p>
                     <p
-                      className={`mt-1 text-2xl font-semibold ${roi >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+                      className={`mt-2 text-2xl font-semibold ${roi >= 0 ? "text-emerald-600" : "text-rose-600"}`}
                     >
                       {roi.toFixed(1)}x
                     </p>
                     <p className="mt-1 text-xs text-slate-400">months</p>
                   </div>
-                  <div className="rounded-lg border border-slate-200 p-4">
-                    <p className="text-xs text-slate-500">Payback Period</p>
-                    <p className="mt-1 text-2xl font-semibold text-slate-900">
+                  
+                  {/* Payback Period */}
+                  <div className="flex-1 px-4 py-2 last:pr-0">
+                    <p className="text-sm text-slate-500">Payback Period</p>
+                    <p className="mt-2 text-2xl font-semibold text-slate-900">
                       {paybackMonths.toFixed(1)}
                     </p>
                     <p className="mt-1 text-xs text-slate-400">months</p>

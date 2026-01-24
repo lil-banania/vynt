@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/table";
 import { Anomaly } from "@/lib/types/database";
 import { AnomalySidePanel } from "./AnomalySidePanel";
+import { CommonPatternsColumn } from "./CommonPatternsColumn";
 
 type NeedsActionLayoutProps = {
   anomalies: Anomaly[];
@@ -39,14 +40,10 @@ const categoryConfig: Record<string, { label: string }> = {
   other: { label: "Other" },
 };
 
-function AnomalyTableColumn({
-  title,
-  subtitle,
+function TopIssuesColumn({
   anomalies,
   onDetailsClick,
 }: {
-  title: string;
-  subtitle: string;
   anomalies: Anomaly[];
   onDetailsClick: (anomaly: Anomaly) => void;
 }) {
@@ -62,10 +59,10 @@ function AnomalyTableColumn({
       <div className="flex items-center justify-between px-4 pt-4 pb-2">
         <div className="flex-1">
           <div className="flex items-center gap-1.5">
-            <h3 className="text-base font-medium text-[#0C0A09]">{title}</h3>
+            <h3 className="text-base font-medium text-[#0C0A09]">Top issues</h3>
             <Info className="h-4 w-4 text-[#0A0A0A]" />
           </div>
-          <p className="text-sm text-[#78716C] mt-1.5">{subtitle}</p>
+          <p className="text-sm text-[#78716C] mt-1.5">By Financial Impact</p>
         </div>
       </div>
 
@@ -161,47 +158,17 @@ export function NeedsActionLayout({ anomalies }: NeedsActionLayoutProps) {
   // Top 5 issues by impact
   const topIssues = sortedAnomalies.slice(0, 5);
 
-  // Analyze common patterns by category
-  const categoryGroups = sortedAnomalies.reduce((acc, anomaly) => {
-    const cat = anomaly.category;
-    if (!acc[cat]) {
-      acc[cat] = { count: 0, totalImpact: 0, anomalies: [] };
-    }
-    acc[cat].count++;
-    acc[cat].totalImpact += anomaly.annual_impact ?? 0;
-    acc[cat].anomalies.push(anomaly);
-    return acc;
-  }, {} as Record<string, { count: number; totalImpact: number; anomalies: Anomaly[] }>);
-
-  const commonPatterns = Object.entries(categoryGroups)
-    .map(([category, data]) => ({
-      category,
-      ...data,
-    }))
-    .sort((a, b) => b.totalImpact - a.totalImpact)
-    .slice(0, 5);
-
-  // Flatten common patterns into individual anomalies
-  const patternAnomalies = commonPatterns.flatMap((p) => p.anomalies).slice(0, 5);
-
   return (
     <>
       <div className="grid grid-cols-2 gap-5 overflow-clip">
         {/* Left Column: Top Issues */}
-        <AnomalyTableColumn
-          title="Top issues"
-          subtitle="By Financial Impact"
+        <TopIssuesColumn
           anomalies={topIssues}
           onDetailsClick={setSelectedAnomaly}
         />
 
-        {/* Right Column: Common Patterns */}
-        <AnomalyTableColumn
-          title="Common Patterns Identified"
-          subtitle="By Financial Impact"
-          anomalies={patternAnomalies}
-          onDetailsClick={setSelectedAnomaly}
-        />
+        {/* Right Column: Common Patterns (AI Analysis) */}
+        <CommonPatternsColumn anomalies={sortedAnomalies} />
       </div>
 
       <AnomalySidePanel
