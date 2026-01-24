@@ -19,19 +19,48 @@ import { Audit } from "@/lib/types/database";
 
 type AuditsTableBodyProps = {
   audits: Audit[];
-  formatAuditId: (id: string) => string;
-  formatDateRange: (start: string | null, end: string | null) => string;
-  formatCurrency: (value: number | null) => string;
-  StatusBadge: React.ComponentType<{ status: Audit["status"] }>;
 };
 
-export function AuditsTableBody({
-  audits,
-  formatAuditId,
-  formatDateRange,
-  formatCurrency,
-  StatusBadge,
-}: AuditsTableBodyProps) {
+// Format functions moved to Client Component
+const formatCurrency = (value: number | null) => {
+  if (value === null) return "$0";
+  return value.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
+};
+
+const formatDateRange = (start: string | null, end: string | null) => {
+  if (!start || !end) return "Period not set";
+  const formatMonth = (date: string) =>
+    new Date(date).toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+    });
+  return `${formatMonth(start)} - ${formatMonth(end)}`;
+};
+
+const formatAuditId = (id: string) => {
+  return `au${id.slice(0, 5)}-${id.slice(5, 7)}`;
+};
+
+const StatusBadge = ({ status }: { status: Audit["status"] }) => {
+  if (status === "published") {
+    return (
+      <Badge className="bg-orange-500 hover:bg-orange-500 text-white border-0">
+        Published
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="secondary" className="text-slate-600">
+      In progress
+    </Badge>
+  );
+};
+
+export function AuditsTableBody({ audits }: AuditsTableBodyProps) {
   if (audits.length === 0) {
     return (
       <TableBody>

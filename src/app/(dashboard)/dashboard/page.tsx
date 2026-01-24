@@ -165,13 +165,7 @@ const DashboardPage = async () => {
               <TableHead className="w-12"></TableHead>
             </TableRow>
           </TableHeader>
-          <AuditsTableBody
-            audits={audits}
-            formatAuditId={formatAuditId}
-            formatDateRange={formatDateRange}
-            formatCurrency={formatCurrency}
-            StatusBadge={StatusBadge}
-          />
+          <AuditsTableBody audits={audits} />
         </Table>
       </div>
 
