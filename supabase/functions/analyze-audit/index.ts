@@ -323,10 +323,10 @@ serve(async (req) => {
       return jsonResponse({ error: "CSV headers are missing." }, 400);
     }
 
-    let file1Rows = file1Result.data.filter(
+    const file1Rows = file1Result.data.filter(
       (row): row is Record<string, string> => Boolean(row) && typeof row === "object"
     );
-    let file2Rows = file2Result.data.filter(
+    const file2Rows = file2Result.data.filter(
       (row): row is Record<string, string> => Boolean(row) && typeof row === "object"
     );
 
@@ -450,7 +450,7 @@ serve(async (req) => {
     // ============================================================================
     const originalFile1Count = file1Rows.length;
     const originalFile2Count = file2Rows.length;
-    let samplingNote = "";
+    const samplingNote = "";
     
     const startTime = Date.now();
     console.log(`[analyze-audit] Starting direct processing: ${file1Rows.length} x ${file2Rows.length} rows`);

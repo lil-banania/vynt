@@ -1,15 +1,14 @@
 import { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import {
-  LayoutGrid,
-  Upload,
-  Settings,
-  LogOut,
-} from "lucide-react";
+import { BarChart3, Settings, LogOut, Plus } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { VyntLogo } from "@/components/ui/vynt-logo";
+import { MobileNotSupported } from "@/components/layout/mobile-not-supported";
+import { Toaster } from "sonner";
 
 type DashboardLayoutProps = {
   children: ReactNode;
@@ -25,15 +24,6 @@ const DashboardLayout = async ({ children }: DashboardLayoutProps) => {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, role")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const userLabel =
-    user.user_metadata?.full_name || user.email || "User";
-
   const signOut = async () => {
     "use server";
     const serverSupabase = await createClient();
@@ -42,55 +32,74 @@ const DashboardLayout = async ({ children }: DashboardLayoutProps) => {
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-50 text-slate-900">
-      <aside className="w-64 border-r border-slate-200 bg-white px-4 py-6">
-        <div className="mb-8 text-xl font-semibold tracking-tight">
-          Vynt
-        </div>
-        <nav className="space-y-1 text-sm">
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-3 rounded-md px-3 py-2 text-slate-700 transition hover:bg-slate-100"
-          >
-            <LayoutGrid className="h-4 w-4" />
-            My Audits
-          </Link>
-          <Link
-            href="/upload"
-            className="flex items-center gap-3 rounded-md px-3 py-2 text-slate-700 transition hover:bg-slate-100"
-          >
-            <Upload className="h-4 w-4" />
-            New Audit
-          </Link>
-          <Link
-            href="/settings"
-            className="flex items-center gap-3 rounded-md px-3 py-2 text-slate-700 transition hover:bg-slate-100"
-          >
-            <Settings className="h-4 w-4" />
-            Settings
-          </Link>
-        </nav>
-      </aside>
+    <>
+      {/* Mobile not supported overlay */}
+      <MobileNotSupported />
 
-      <div className="flex flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
-          <div className="text-sm text-slate-600">
-            {userLabel}
+      <div className="hidden lg:flex min-h-screen bg-white text-slate-900">
+        {/* Sidebar */}
+        <aside className="fixed left-0 top-0 z-40 h-screen w-60 border-r border-slate-200 bg-white flex flex-col">
+          {/* Logo */}
+          <div className="px-4 py-8">
+            <VyntLogo size="sm" />
           </div>
-          <form action={signOut}>
+
+          {/* New Audit Button */}
+          <div className="px-4 pb-4">
             <Button
-              variant="ghost"
-              type="submit"
-              className="text-slate-600 hover:text-slate-900"
+              asChild
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white"
             >
-              <LogOut className="mr-2 h-4 w-4" />
-              Logout
+              <Link href="/upload">
+                <Plus className="h-4 w-4" />
+                New audit
+              </Link>
             </Button>
-          </form>
-        </header>
-        <main className="flex-1 px-6 py-8">{children}</main>
+          </div>
+
+          {/* Navigation */}
+          <nav className="flex-1 px-4">
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-900 bg-slate-100 transition hover:bg-slate-100"
+            >
+              <BarChart3 className="h-4 w-4" />
+              Audits
+            </Link>
+          </nav>
+
+          {/* Bottom section */}
+          <div className="mt-auto px-4 pb-6">
+            <Separator className="mb-4" />
+            <div className="space-y-1">
+              <Link
+                href="/settings"
+                className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+              >
+                <Settings className="h-4 w-4" />
+                Settings
+              </Link>
+              <form action={signOut}>
+                <button
+                  type="submit"
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Log out
+                </button>
+              </form>
+            </div>
+          </div>
+        </aside>
+
+        {/* Main content */}
+        <main className="ml-60 flex-1 min-h-screen">
+          <div className="p-6">{children}</div>
+        </main>
       </div>
-    </div>
+
+      <Toaster position="bottom-right" richColors />
+    </>
   );
 };
 

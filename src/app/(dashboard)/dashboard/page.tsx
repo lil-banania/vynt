@@ -1,28 +1,37 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { MoreHorizontal, Eye, Download, Search, ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { Audit, Profile } from "@/lib/types/database";
 
-type DashboardPageProps = {
-  searchParams?: {
-    org?: string;
-  };
-};
-
-type Organization = {
-  id: string;
-  name: string;
-};
-
 const formatCurrency = (value: number | null) => {
-  if (value === null) {
-    return "$0";
-  }
+  if (value === null) return "$0";
   return value.toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
@@ -31,48 +40,39 @@ const formatCurrency = (value: number | null) => {
 };
 
 const formatDateRange = (start: string | null, end: string | null) => {
-  if (!start || !end) {
-    return "Period not set";
-  }
-  const format = (value: string) =>
-    new Date(value).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
+  if (!start || !end) return "Period not set";
+  const formatMonth = (date: string) =>
+    new Date(date).toLocaleDateString("en-US", {
+      month: "long",
       year: "numeric",
     });
-  return `${format(start)} - ${format(end)}`;
+  return `${formatMonth(start)} - ${formatMonth(end)}`;
 };
 
-const statusBadgeVariant = (status: Audit["status"]) => {
+const formatAuditId = (id: string) => {
+  return `au${id.slice(0, 5)}-${id.slice(5, 7)}`;
+};
+
+type StatusBadgeProps = {
+  status: Audit["status"];
+};
+
+const StatusBadge = ({ status }: StatusBadgeProps) => {
   if (status === "published") {
-    return "secondary";
+    return (
+      <Badge className="bg-orange-500 hover:bg-orange-500 text-white border-0">
+        Published
+      </Badge>
+    );
   }
-  if (status === "processing" || status === "review") {
-    return "default";
-  }
-  return "outline";
+  return (
+    <Badge variant="secondary" className="text-slate-600">
+      In progress
+    </Badge>
+  );
 };
 
-const statusLabel = (status: Audit["status"]) => {
-  if (status === "processing" || status === "review" || status === "pending") {
-    return "In review";
-  }
-  if (status === "published") {
-    return "Published";
-  }
-  if (status === "completed") {
-    return "Completed";
-  }
-  if (status === "in_progress") {
-    return "In progress";
-  }
-  if (status === "draft") {
-    return "Draft";
-  }
-  return status;
-};
-
-const DashboardPage = async ({ searchParams }: DashboardPageProps) => {
+const DashboardPage = async () => {
   const supabase = await createClient();
   const {
     data: { user },
@@ -100,19 +100,6 @@ const DashboardPage = async ({ searchParams }: DashboardPageProps) => {
     null;
   const isAdmin =
     profile.role === "vynt_admin" || metadataRole === "vynt_admin";
-  const selectedOrg = searchParams?.org ?? "all";
-
-  const organizationsQuery = isAdmin
-    ? dataClient.from("organizations").select("id, name")
-    : dataClient
-        .from("organizations")
-        .select("id, name")
-        .eq("id", profile.organization_id);
-
-  const { data: organizationsData } = await organizationsQuery.returns<
-    Organization[]
-  >();
-  const organizations = organizationsData ?? [];
 
   const auditsQuery = dataClient
     .from("audits")
@@ -123,116 +110,142 @@ const DashboardPage = async ({ searchParams }: DashboardPageProps) => {
 
   if (!isAdmin) {
     auditsQuery.eq("organization_id", profile.organization_id);
-  } else if (selectedOrg !== "all") {
-    auditsQuery.eq("organization_id", selectedOrg);
   }
 
   const { data: auditsData } = await auditsQuery.returns<Audit[]>();
   const audits = auditsData ?? [];
-  const orgNameById = new Map(
-    organizations.map((org) => [org.id, org.name])
-  );
+
+  const totalPages = Math.max(1, Math.ceil(audits.length / 10));
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">
-            Your Revenue Audits
-          </h1>
-          <p className="text-sm text-slate-600">
-            {isAdmin
-              ? "Viewing all audits across organizations."
-              : "Audits for your organization, including those in progress."}
-          </p>
-        </div>
-
-        {isAdmin && (
-          <Card className="border-slate-200">
-            <CardContent className="py-3">
-              <form action="/dashboard" method="get">
-                <div className="flex items-center gap-3 text-sm text-slate-600">
-                  <label htmlFor="org" className="font-medium">
-                    Organization
-                  </label>
-                  <select
-                    id="org"
-                    name="org"
-                    defaultValue={selectedOrg}
-                    className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700"
-                  >
-                    <option value="all">All</option>
-                    {organizations.map((org) => (
-                      <option key={org.id} value={org.id}>
-                        {org.name}
-                      </option>
-                    ))}
-                  </select>
-                  <Button type="submit" variant="outline" size="sm">
-                    Filter
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        )}
+      {/* Page Header */}
+      <div>
+        <h1 className="text-3xl font-semibold text-slate-900">Audits</h1>
       </div>
 
-      {audits.length === 0 && (
-        <Card className="border-slate-200">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold text-slate-900">
-              No audits yet
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm text-slate-600">
-            <p>Start your first revenue audit to get insights.</p>
-            <Button asChild>
-              <Link href="/upload">Start a new audit</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+      {/* Filters */}
+      <div className="flex items-center gap-3">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            placeholder="Audit ID"
+            className="w-60 pl-9"
+          />
+        </div>
+        <Select>
+          <SelectTrigger className="w-60">
+            <SelectValue placeholder="Audit time" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All time</SelectItem>
+            <SelectItem value="last-30">Last 30 days</SelectItem>
+            <SelectItem value="last-90">Last 90 days</SelectItem>
+            <SelectItem value="last-year">Last year</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="published">Published</SelectItem>
+            <SelectItem value="in_progress">In progress</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
+      {/* Table */}
+      <div className="rounded-lg border border-slate-200">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="w-12">
+                <input type="checkbox" className="h-4 w-4 rounded border-slate-300" />
+              </TableHead>
+              <TableHead>Audit ID</TableHead>
+              <TableHead>Audit time</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Anomalies</TableHead>
+              <TableHead className="text-right">Total amount</TableHead>
+              <TableHead className="w-12"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {audits.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="h-32 text-center text-slate-500">
+                  No audits yet. Click &quot;New audit&quot; to get started.
+                </TableCell>
+              </TableRow>
+            ) : (
+              audits.map((audit) => (
+                <TableRow key={audit.id}>
+                  <TableCell>
+                    <input type="checkbox" className="h-4 w-4 rounded border-slate-300" />
+                  </TableCell>
+                  <TableCell className="font-medium text-slate-900">
+                    {formatAuditId(audit.id)}
+                  </TableCell>
+                  <TableCell className="text-slate-600">
+                    {formatDateRange(audit.audit_period_start, audit.audit_period_end)}
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge status={audit.status} />
+                  </TableCell>
+                  <TableCell className="text-right text-slate-900">
+                    {audit.total_anomalies ?? 0}
+                  </TableCell>
+                  <TableCell className="text-right font-medium text-slate-900">
+                    {formatCurrency(audit.annual_revenue_at_risk)}
+                  </TableCell>
+                  <TableCell>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon-sm">
+                          <MoreHorizontal className="h-4 w-4" />
+                          <span className="sr-only">Open menu</span>
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem asChild>
+                          <Link href={`/audit/${audit.id}`}>
+                            <Eye className="h-4 w-4" />
+                            View
+                          </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem>
+                          <Download className="h-4 w-4" />
+                          Export
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Pagination */}
       {audits.length > 0 && (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {audits.map((audit) => (
-            <Link key={audit.id} href={`/audit/${audit.id}`}>
-              <Card className="h-full border-slate-200 transition hover:border-slate-300 hover:shadow-sm">
-                <CardHeader className="space-y-2">
-                  <div className="text-sm text-slate-500">
-                    {isAdmin
-                      ? orgNameById.get(audit.organization_id) ??
-                        "Organization"
-                      : "Organization"}
-                  </div>
-                  <CardTitle className="text-base font-semibold text-slate-900">
-                    {formatDateRange(
-                      audit.audit_period_start,
-                      audit.audit_period_end
-                    )}
-                  </CardTitle>
-                  <Badge variant={statusBadgeVariant(audit.status)}>
-                    {statusLabel(audit.status)}
-                  </Badge>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm text-slate-600">
-                  <div className="flex items-center justify-between">
-                    <span>Total anomalies</span>
-                    <span className="font-medium text-slate-900">
-                      {audit.total_anomalies ?? 0}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>Revenue at risk</span>
-                    <span className="font-medium text-slate-900">
-                      {formatCurrency(audit.annual_revenue_at_risk)}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
+        <div className="flex items-center justify-between text-sm text-slate-500">
+          <div>
+            0 of {audits.length} row(s) selected.
+          </div>
+          <div className="flex items-center gap-4">
+            <span>Page 1 of {totalPages}</span>
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon-sm" disabled>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="icon-sm" disabled={totalPages <= 1}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

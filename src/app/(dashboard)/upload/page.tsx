@@ -2,42 +2,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
+import Link from "next/link";
+import { X, ArrowRight, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
-import FileUploader from "@/components/upload/FileUploader";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-
-type UploadStep = "usage" | "stripe" | "review";
-
-type AnalysisResult = {
-  anomaliesDetected: number;
-  annualRevenueAtRisk: number;
-  aiInsights: string | null;
-} | null;
-
-type AnalysisStatus = "idle" | "processing" | "review" | "error";
+import { VyntLogo } from "@/components/ui/vynt-logo";
+import { Dropzone } from "@/components/upload/Dropzone";
+import { Separator } from "@/components/ui/separator";
 
 const UploadPage = () => {
   const router = useRouter();
   const [auditId, setAuditId] = useState<string | null>(null);
-  const [isCreatingAudit, setIsCreatingAudit] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [usageUploaded, setUsageUploaded] = useState(false);
   const [stripeUploaded, setStripeUploaded] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>("idle");
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult>(null);
-  const [showResultDialog, setShowResultDialog] = useState(false);
   const [progress, setProgress] = useState(0);
 
   const createAuditInFlight = useRef<Promise<string> | null>(null);
@@ -45,7 +24,6 @@ const UploadPage = () => {
   const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
@@ -58,8 +36,6 @@ const UploadPage = () => {
     if (auditId) return auditId;
     if (createAuditInFlight.current) return createAuditInFlight.current;
 
-    setIsCreatingAudit(true);
-    setErrorMessage(null);
 
     const promise = (async () => {
       const response = await fetch("/api/audits/create", { method: "POST" });
@@ -77,14 +53,8 @@ const UploadPage = () => {
 
     try {
       return await promise;
-    } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "An error occurred while creating the audit."
-      );
-      throw error;
     } finally {
       createAuditInFlight.current = null;
-      setIsCreatingAudit(false);
     }
   };
 
@@ -107,8 +77,6 @@ const UploadPage = () => {
     if (!auditId || !usageUploaded || !stripeUploaded) return;
 
     setIsSubmitting(true);
-    setErrorMessage(null);
-    setAnalysisStatus("processing");
     setProgress(0);
 
     try {
@@ -134,10 +102,10 @@ const UploadPage = () => {
         });
       }, 500);
 
-      // Start polling for results
+      // Poll for results
       const pollAuditStatus = async () => {
         if (!auditId) return;
-        
+
         try {
           const pollResponse = await fetch("/api/audits/poll", {
             method: "POST",
@@ -148,11 +116,9 @@ const UploadPage = () => {
           const pollData = await pollResponse.json().catch(() => null);
 
           if (!pollResponse.ok || !pollData) {
-            console.error("Poll error:", pollData);
-            return; // Don't stop polling on transient errors
+            return;
           }
 
-          // Update progress from actual chunk completion if available
           if (pollData.isChunked && pollData.progress !== null) {
             setProgress(pollData.progress);
           }
@@ -160,21 +126,19 @@ const UploadPage = () => {
           if (pollData.status === "review" || pollData.status === "published") {
             stopPolling();
             setProgress(100);
-            setAnalysisResult({
-              anomaliesDetected: pollData.totalAnomalies ?? 0,
-              annualRevenueAtRisk: pollData.annualRevenueAtRisk ?? 0,
-              aiInsights: pollData.aiInsights ?? null,
-            });
-            setAnalysisStatus("review");
             setIsSubmitting(false);
-            setShowResultDialog(true);
+            toast.success("Audit submitted successfully!", {
+              description: "Your revenue audit has been queued for analysis.",
+            });
+            router.push("/dashboard");
             return;
           }
 
           if (pollData.status === "error") {
             stopPolling();
-            setAnalysisStatus("error");
-            setErrorMessage(pollData.errorMessage ?? "Analysis failed.");
+            toast.error("Analysis failed", {
+              description: pollData.errorMessage ?? "Please try again.",
+            });
             setIsSubmitting(false);
             return;
           }
@@ -183,195 +147,114 @@ const UploadPage = () => {
         }
       };
 
-      // Poll immediately, then every 3 seconds
       await pollAuditStatus();
       pollingIntervalRef.current = setInterval(pollAuditStatus, 3000);
 
-      // Timeout after 10 minutes for large files
       pollingTimeoutRef.current = setTimeout(() => {
         stopPolling();
-        setAnalysisStatus("error");
-        setErrorMessage("Analysis is taking longer than expected. Please check back later.");
+        toast.error("Analysis timeout", {
+          description: "Analysis is taking longer than expected. Please check back later.",
+        });
         setIsSubmitting(false);
       }, 10 * 60 * 1000);
-
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unable to start analysis.");
-      setAnalysisStatus("error");
+      toast.error("Error", {
+        description: error instanceof Error ? error.message : "Unable to start analysis.",
+      });
       setIsSubmitting(false);
     }
   };
 
-  const currentStep: UploadStep = usageUploaded
-    ? stripeUploaded
-      ? "review"
-      : "stripe"
-    : "usage";
-
-  const stepBadgeVariant = (step: UploadStep) => {
-    if (step === currentStep) return "default";
-    if (
-      (step === "usage" && usageUploaded) ||
-      (step === "stripe" && stripeUploaded) ||
-      (step === "review" && usageUploaded && stripeUploaded)
-    ) {
-      return "secondary";
-    }
-    return "outline";
-  };
-
-  const formatCurrency = (value: number) => {
-    return value.toLocaleString("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 0,
-    });
-  };
+  const canSubmit = usageUploaded && stripeUploaded && !isSubmitting;
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900">New Revenue Audit</h1>
-        <div className="mt-4 flex flex-wrap gap-3 text-sm text-slate-700">
-          <Badge variant={stepBadgeVariant("usage")}>1. Upload Usage Logs</Badge>
-          <Badge variant={stepBadgeVariant("stripe")}>2. Upload Stripe Export</Badge>
-          <Badge variant={stepBadgeVariant("review")}>3. Review &amp; Submit</Badge>
+    <div className="fixed inset-0 z-50 flex flex-col bg-white">
+      {/* Header */}
+      <header className="flex items-center justify-between border-b border-slate-200 px-8 py-6">
+        <VyntLogo size="md" />
+        <h1 className="text-xl font-medium text-slate-900">Revenue audit</h1>
+        <Button variant="outline" asChild>
+          <Link href="/dashboard">
+            <X className="h-4 w-4" />
+            Close
+          </Link>
+        </Button>
+      </header>
+
+      {/* Content */}
+      <div className="flex flex-1 items-center justify-center p-8">
+        <div className="w-full max-w-3xl">
+          {/* Upload Cards */}
+          <div className="flex rounded-xl border border-slate-200 bg-white">
+            {/* Step 1 */}
+            <div className="flex-1 p-6">
+              <div className="mb-4">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  STEP 1
+                </span>
+                <h2 className="mt-1 text-lg font-semibold text-slate-900">
+                  Transactions CSV
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Export from your product, database, or billing system.
+                </p>
+              </div>
+              <Dropzone
+                auditId={auditId}
+                onEnsureAudit={ensureAudit}
+                fileType="usage_logs"
+                onUploadComplete={() => setUsageUploaded(true)}
+              />
+            </div>
+
+            {/* Separator */}
+            <Separator orientation="vertical" className="h-auto" />
+
+            {/* Step 2 */}
+            <div className="flex-1 p-6">
+              <div className="mb-4">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  STEP 2
+                </span>
+                <h2 className="mt-1 text-lg font-semibold text-slate-900">
+                  Stripe CSV export
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Export from Stripe to compare charges and payouts.
+                </p>
+              </div>
+              <Dropzone
+                auditId={auditId}
+                onEnsureAudit={ensureAudit}
+                fileType="stripe_export"
+                onUploadComplete={() => setStripeUploaded(true)}
+              />
+            </div>
+          </div>
+
+          {/* Submit Button */}
+          <div className="mt-8 flex justify-center">
+            <Button
+              size="lg"
+              className="bg-orange-500 hover:bg-orange-600 text-white px-8"
+              onClick={handleStartAnalysis}
+              disabled={!canSubmit}
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Analyzing... {Math.round(progress)}%
+                </>
+              ) : (
+                <>
+                  Run audit
+                  <ArrowRight className="h-4 w-4" />
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       </div>
-
-      {errorMessage && (
-        <Card className="border-rose-200 bg-rose-50">
-          <CardContent className="py-4 text-sm text-rose-700">{errorMessage}</CardContent>
-        </Card>
-      )}
-
-      {isCreatingAudit && (
-        <Card className="border-slate-200">
-          <CardContent className="py-6 text-sm text-slate-600">Creating the audit...</CardContent>
-        </Card>
-      )}
-
-      {!isCreatingAudit && (
-        <>
-          <Card className="border-slate-200 bg-white">
-            <CardHeader>
-              <CardTitle className="text-base font-semibold">Review &amp; Submit</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-slate-600">
-                {usageUploaded && stripeUploaded
-                  ? "Both files are ready. Click to run automated analysis."
-                  : "Please upload both files to continue."}
-              </div>
-              <Button
-                type="button"
-                size="lg"
-                className="w-full sm:w-auto"
-                onClick={handleStartAnalysis}
-                disabled={!usageUploaded || !stripeUploaded || isSubmitting}
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Analyzing... {Math.round(progress)}%
-                  </>
-                ) : (
-                  "Start Analysis"
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Card className="border-slate-200">
-              <CardHeader className="pb-4">
-                <CardTitle className="text-base font-semibold">Usage Logs</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <FileUploader
-                  auditId={auditId}
-                  onEnsureAudit={ensureAudit}
-                  fileType="usage_logs"
-                  onUploadComplete={() => setUsageUploaded(true)}
-                />
-              </CardContent>
-            </Card>
-
-            <Card className="border-slate-200">
-              <CardHeader className="pb-4">
-                <CardTitle className="text-base font-semibold">Stripe Export</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <FileUploader
-                  auditId={auditId}
-                  onEnsureAudit={ensureAudit}
-                  fileType="stripe_export"
-                  onUploadComplete={() => setStripeUploaded(true)}
-                />
-              </CardContent>
-            </Card>
-          </div>
-        </>
-      )}
-
-      {/* Results Dialog */}
-      <Dialog open={showResultDialog} onOpenChange={(open) => {
-        if (!open) router.push("/dashboard");
-      }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-              Analysis Complete
-            </DialogTitle>
-            <DialogDescription className="space-y-4 pt-4">
-              <p className="text-slate-600">
-                Your revenue audit has been analyzed. Here are the key findings:
-              </p>
-              
-              {analysisResult && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-center">
-                      <div className="text-3xl font-bold text-slate-900">
-                        {analysisResult.anomaliesDetected}
-                      </div>
-                      <div className="text-sm text-slate-600">Anomalies Detected</div>
-                    </div>
-                    <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-center">
-                      <div className="text-3xl font-bold text-rose-600">
-                        {formatCurrency(analysisResult.annualRevenueAtRisk)}
-                      </div>
-                      <div className="text-sm text-rose-700">Revenue at Risk</div>
-                    </div>
-                  </div>
-
-                  {analysisResult.aiInsights && (
-                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                      <div className="mb-2 flex items-center gap-2 font-semibold text-blue-900">
-                        <AlertTriangle className="h-4 w-4" />
-                        AI Summary
-                      </div>
-                      <p className="text-sm text-blue-800 whitespace-pre-wrap">
-                        {analysisResult.aiInsights}
-                      </p>
-                    </div>
-                  )}
-
-                  <p className="text-sm text-slate-500 text-center pt-2">
-                    Our team will review your audit and contact you within 48 hours.
-                  </p>
-                </div>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button className="w-full" onClick={() => router.push("/dashboard")}>
-              Back to Dashboard
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

@@ -26,9 +26,11 @@ export default function AuditProcessingPage({ params }: ProcessingPageProps) {
   useEffect(() => {
     if (!auditId) return;
 
+    /* eslint-disable prefer-const */
     let interval: ReturnType<typeof setInterval>;
     let progressInterval: ReturnType<typeof setInterval>;
     let timeoutTimer: ReturnType<typeof setTimeout>;
+    /* eslint-enable prefer-const */
 
     const pollStatus = async () => {
       try {

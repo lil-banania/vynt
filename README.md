@@ -1,37 +1,251 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🔍 Vynt - Revenue Reconciliation Platform
 
-## Getting Started
+> **Plateforme de réconciliation de revenus pour les entreprises B2B SaaS avec pricing usage-based ou hybride.**
 
-First, run the development server:
+Vynt automatise la détection d'anomalies de facturation en croisant vos données Stripe avec vos logs d'usage, vous permettant de récupérer les revenus perdus et d'optimiser votre billing.
+
+---
+
+## 🎯 Fonctionnalités
+
+- ✅ **Upload de données** : Importez vos CSVs (Stripe Export + Usage Logs)
+- ✅ **Analyse automatisée** : Détection d'anomalies par Machine Learning
+- ✅ **Dashboard interactif** : Visualisez vos audits en temps réel
+- ✅ **Rapports détaillés** : Analyses financières, root cause, recommandations
+- ✅ **Catégorisation** : Anomalies par type (over-billing, under-billing, missing charges...)
+- ✅ **Benchmarking** : Comparez-vous aux standards de l'industrie
+- ✅ **Export PDF** : Générez des rapports professionnels
+
+---
+
+## 🛠 Stack Technique
+
+| Catégorie | Technologies |
+|-----------|-------------|
+| **Framework** | Next.js 14 (App Router), React 18 |
+| **Language** | TypeScript (strict mode) |
+| **Styling** | Tailwind CSS 4, shadcn/ui |
+| **Backend** | Supabase (PostgreSQL + Auth + Edge Functions) |
+| **Charts** | Chart.js + react-chartjs-2 |
+| **Forms** | React Hook Form + Zod |
+| **Déploiement** | Vercel (Frontend) + Supabase (Backend) |
+
+---
+
+## 🚀 Installation Rapide
+
+### Prérequis
+
+- Node.js 18+ et npm
+- Un projet Supabase (gratuit sur [supabase.com](https://supabase.com))
+
+### 1. Cloner le repository
+
+```bash
+git clone https://github.com/votre-org/vynt.git
+cd vynt
+```
+
+### 2. Installer les dépendances
+
+```bash
+npm install
+```
+
+### 3. Configurer les variables d'environnement
+
+Créez un fichier `.env.local` à la racine :
+
+```bash
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=https://xxxxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGc...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...  # Pour l'admin
+
+# Next.js
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+```
+
+### 4. Appliquer les migrations Supabase
+
+```bash
+# Installer le CLI Supabase
+npm install -g supabase
+
+# Se connecter
+npx supabase login
+
+# Lier le projet
+npx supabase link --project-ref <votre-project-id>
+
+# Appliquer les migrations
+npx supabase db push
+```
+
+### 5. Déployer les Edge Functions
+
+```bash
+npx supabase functions deploy analyze-audit --no-verify-jwt
+npx supabase functions deploy process-chunk --no-verify-jwt
+```
+
+### 6. Lancer le serveur de développement
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Ouvrez [http://localhost:3000](http://localhost:3000) dans votre navigateur.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 📁 Structure du Projet
 
-## Learn More
+```
+vynt/
+├── src/
+│   ├── app/
+│   │   ├── (auth)/          # Pages d'authentification (login, signup)
+│   │   ├── (dashboard)/     # Pages protégées (dashboard, upload, audit)
+│   │   ├── (admin)/         # Panel admin
+│   │   ├── api/             # API Routes Next.js
+│   │   └── globals.css      # Styles globaux (Tailwind)
+│   ├── components/
+│   │   ├── ui/              # Composants shadcn/ui (Button, Card, Table...)
+│   │   ├── layout/          # Layout components (Sidebar, Header...)
+│   │   ├── dashboard/       # Dashboard-specific components
+│   │   ├── audit/           # Audit detail components
+│   │   ├── upload/          # Upload flow components
+│   │   └── charts/          # Chart.js wrappers
+│   ├── lib/
+│   │   ├── supabase/        # Supabase clients (server, client, admin)
+│   │   ├── audit/           # Business logic (calculations, benchmarking...)
+│   │   ├── utils/           # Helpers (CSV parser, formatters...)
+│   │   └── types/           # TypeScript types
+│   └── middleware.ts        # Next.js middleware (auth)
+├── supabase/
+│   ├── functions/           # Edge Functions (analyze-audit, process-chunk)
+│   └── migrations/          # Database migrations
+├── test-data/               # Sample CSVs pour tests
+├── public/                  # Assets statiques
+└── package.json
+```
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🎨 Design System
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Couleurs
 
-## Deploy on Vercel
+- **Primaire** : Slate (neutral)
+- **Accent** : Orange (`#FF6B35`)
+- **Success** : Green
+- **Error** : Red
+- **Warning** : Yellow
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Typographie
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-# Build fix
+- **Police UI** : Inter (sans-serif)
+- **Logo** : Playfair Display (serif)
+
+### Composants
+
+Tous les composants UI sont basés sur **shadcn/ui** :
+
+```tsx
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+```
+
+---
+
+## 🧪 Tests & Quality
+
+### Linter
+
+```bash
+npm run lint
+```
+
+### Build de production
+
+```bash
+npm run build
+```
+
+### Tests (à venir)
+
+```bash
+npm test
+```
+
+---
+
+## 📦 Déploiement en Production
+
+Consultez le guide complet : **[DEPLOYMENT.md](./DEPLOYMENT.md)**
+
+Résumé :
+1. Déployez le frontend sur **Vercel** (auto-détection Next.js)
+2. Configurez les variables d'environnement Supabase sur Vercel
+3. Déployez les Edge Functions Supabase
+4. Testez le flow complet
+
+---
+
+## 📊 Flow Utilisateur
+
+1. **Signup/Login** : Créez un compte via email ou Google
+2. **Upload** : Importez 2 CSVs (Stripe Export + Usage Logs)
+3. **Processing** : L'audit s'exécute en arrière-plan (30-90 secondes)
+4. **Dashboard** : Visualisez vos audits dans la liste
+5. **Audit Detail** : Consultez les anomalies détectées par catégorie
+6. **Actions** : Exportez le rapport, marquez les anomalies comme résolues
+
+---
+
+## 🤝 Contribution
+
+Les contributions sont les bienvenues ! Pour contribuer :
+
+1. Forkez le projet
+2. Créez une branche feature (`git checkout -b feature/AmazingFeature`)
+3. Commitez vos changements (`git commit -m 'Add some AmazingFeature'`)
+4. Pushez vers la branche (`git push origin feature/AmazingFeature`)
+5. Ouvrez une Pull Request
+
+### Conventions de code
+
+- **TypeScript strict** : Tous les types doivent être explicites
+- **Naming** : camelCase pour variables, PascalCase pour composants
+- **Formatting** : Utilisez Prettier (configuré dans le projet)
+- **Linting** : Aucune erreur ESLint avant commit
+
+---
+
+## 📄 Licence
+
+MIT License - voir le fichier [LICENSE](./LICENSE) pour plus de détails.
+
+---
+
+## 🆘 Support
+
+- 📧 Email : support@vynt.io
+- 💬 Discord : [discord.gg/vynt](https://discord.gg/vynt)
+- 📖 Documentation : [docs.vynt.io](https://docs.vynt.io)
+
+---
+
+## 🙏 Remerciements
+
+- [Next.js](https://nextjs.org/) - Framework React
+- [Supabase](https://supabase.com/) - Backend as a Service
+- [shadcn/ui](https://ui.shadcn.com/) - Composants UI
+- [Tailwind CSS](https://tailwindcss.com/) - Styling
+- [Chart.js](https://www.chartjs.org/) - Visualisations
+
+---
+
+**Vynt** - Réconciliez vos revenus en toute confiance. 🚀

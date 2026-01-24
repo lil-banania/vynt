@@ -1,27 +1,25 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { AlertTriangle, DollarSign, Users, FileText, Target, ArrowLeft, Sparkles } from "lucide-react";
+import { ArrowLeft, Download } from "lucide-react";
 
-import AuditSummary from "@/components/dashboard/AuditSummary";
-import AnomalyTable from "@/components/dashboard/AnomalyTable";
-import ExportPdfButton from "@/components/dashboard/ExportPdfButton";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/server";
-import { Anomaly, Audit, Profile, AnomalyCategory, AnomalyConfidence } from "@/lib/types/database";
+import { Anomaly, Audit, Profile, AnomalyCategory } from "@/lib/types/database";
 
-// New CFO-ready components
-import FinancialImpactSummary from "@/components/audit/FinancialImpactSummary";
-import RecoveryPriorityMatrix from "@/components/audit/RecoveryPriorityMatrix";
-import IndustryBenchmark from "@/components/audit/IndustryBenchmark";
-import LeakageVelocity from "@/components/audit/LeakageVelocity";
-import EnhancedRootCause from "@/components/audit/EnhancedRootCause";
-import ConfidenceBadge from "@/components/audit/ConfidenceBadge";
-
-// Calculation utilities
-import { calculateFinancialImpact, calculateVelocity, formatCustomerDisplay } from "@/lib/audit/calculations";
-import { groupByPriority } from "@/lib/audit/prioritization";
-import { calculateBenchmark } from "@/lib/audit/benchmarking";
-import { getRootCauseTemplate } from "@/lib/audit/root-cause-templates";
+// Charts
+import { AreaChartWrapper } from "./AreaChartWrapper";
+import { BarChartWrapper } from "./BarChartWrapper";
 
 type AuditDetailPageProps = {
   params: Promise<{
@@ -29,16 +27,9 @@ type AuditDetailPageProps = {
   }>;
 };
 
-type Organization = {
-  id: string;
-  name: string;
-};
-
-type AuditWithExtras = Audit & { 
+type AuditWithExtras = Audit & {
   ai_insights?: string | null;
   total_arr?: number | null;
-  company_vertical?: string | null;
-  previous_audit_date?: string | null;
 };
 
 const formatCurrency = (value: number | null) => {
@@ -50,26 +41,50 @@ const formatCurrency = (value: number | null) => {
   });
 };
 
-const categoryConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
-  zombie_subscription: { label: "Zombie Subscription", color: "bg-rose-500", icon: Users },
-  unbilled_usage: { label: "Unbilled Usage", color: "bg-amber-500", icon: FileText },
-  pricing_mismatch: { label: "Pricing Mismatch", color: "bg-purple-500", icon: DollarSign },
-  duplicate_charge: { label: "Duplicate Charge", color: "bg-orange-500", icon: AlertTriangle },
-  failed_payment: { label: "Failed Payment", color: "bg-red-500", icon: AlertTriangle },
-  high_refund_rate: { label: "High Refund Rate", color: "bg-yellow-500", icon: AlertTriangle },
-  missing_in_stripe: { label: "Missing in Stripe", color: "bg-blue-500", icon: AlertTriangle },
-  missing_in_db: { label: "Missing in DB", color: "bg-cyan-500", icon: AlertTriangle },
-  amount_mismatch: { label: "Amount Mismatch", color: "bg-indigo-500", icon: Target },
-  revenue_leakage: { label: "Revenue Leakage", color: "bg-pink-500", icon: DollarSign },
-  disputed_charge: { label: "Disputed Charge", color: "bg-fuchsia-500", icon: AlertTriangle },
-  fee_discrepancy: { label: "Fee Discrepancy", color: "bg-lime-500", icon: AlertTriangle },
-  other: { label: "Other", color: "bg-slate-500", icon: AlertTriangle },
-};
-
-const confidenceConfig: Record<AnomalyConfidence, { label: string; color: string }> = {
-  high: { label: "HIGH", color: "bg-emerald-600 text-white" },
-  medium: { label: "MEDIUM", color: "bg-amber-500 text-white" },
-  low: { label: "LOW", color: "bg-slate-500 text-white" },
+const categoryConfig: Record<
+  string,
+  { label: string; color: string; chartColor: string }
+> = {
+  failed_payment: {
+    label: "Failed",
+    color: "bg-orange-100 text-orange-700",
+    chartColor: "#fb923c",
+  },
+  duplicate_charge: {
+    label: "Duplicate",
+    color: "bg-blue-100 text-blue-700",
+    chartColor: "#60a5fa",
+  },
+  zombie_subscription: {
+    label: "Zombie",
+    color: "bg-teal-100 text-teal-700",
+    chartColor: "#2dd4bf",
+  },
+  unbilled_usage: {
+    label: "Unbilled",
+    color: "bg-yellow-100 text-yellow-700",
+    chartColor: "#fbbf24",
+  },
+  disputed_charge: {
+    label: "Disputed",
+    color: "bg-green-100 text-green-700",
+    chartColor: "#4ade80",
+  },
+  fee_discrepancy: {
+    label: "Fee",
+    color: "bg-purple-100 text-purple-700",
+    chartColor: "#a78bfa",
+  },
+  pricing_mismatch: {
+    label: "Pricing",
+    color: "bg-pink-100 text-pink-700",
+    chartColor: "#f472b6",
+  },
+  other: {
+    label: "Other",
+    color: "bg-slate-100 text-slate-700",
+    chartColor: "#94a3b8",
+  },
 };
 
 const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
@@ -102,7 +117,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
   const { data: audit } = await supabase
     .from("audits")
     .select(
-      "id, organization_id, status, audit_period_start, audit_period_end, total_anomalies, annual_revenue_at_risk, ai_insights, created_at, published_at, created_by, total_arr, company_vertical, previous_audit_date"
+      "id, organization_id, status, audit_period_start, audit_period_end, total_anomalies, annual_revenue_at_risk, ai_insights, created_at, published_at, created_by, total_arr"
     )
     .eq("id", id)
     .maybeSingle<AuditWithExtras>();
@@ -117,7 +132,11 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
   }
 
   // Redirect to processing page if audit is still being analyzed
-  if (audit.status === "processing" || audit.status === "pending" || audit.status === "draft") {
+  if (
+    audit.status === "processing" ||
+    audit.status === "pending" ||
+    audit.status === "draft"
+  ) {
     redirect(`/audit/${id}/processing`);
   }
 
@@ -126,418 +145,355 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
     redirect("/dashboard");
   }
 
-  const { data: organization } = await supabase
-    .from("organizations")
-    .select("id, name")
-    .eq("id", audit.organization_id)
-    .maybeSingle<Organization>();
-
   const { data: anomaliesData } = await supabase
     .from("anomalies")
     .select(
-      "id, audit_id, category, customer_id, status, confidence, annual_impact, monthly_impact, description, root_cause, recommendation, metadata, detected_at, confidence_score, customer_name, customer_tier"
+      "id, audit_id, category, customer_id, status, confidence, annual_impact, monthly_impact, description, root_cause, recommendation, metadata, detected_at"
     )
     .eq("audit_id", audit.id)
     .order("annual_impact", { ascending: false })
-    .returns<(Anomaly & { confidence_score?: number; customer_name?: string; customer_tier?: string })[]>();
+    .returns<Anomaly[]>();
 
   const anomalies = anomaliesData ?? [];
 
-  // Calculate category breakdown with impact
-  const categoryBreakdown = anomalies.reduce((acc, anomaly) => {
-    const category = anomaly.category as AnomalyCategory;
-    if (!acc[category]) {
-      acc[category] = { count: 0, impact: 0 };
-    }
-    acc[category].count += 1;
-    acc[category].impact += anomaly.annual_impact ?? 0;
-    return acc;
-  }, {} as Record<string, { count: number; impact: number }>);
-
-  // Get top 5 issues by impact
-  const topIssues = anomalies.slice(0, 5);
-
-  // ============================================================================
-  // CFO-READY CALCULATIONS
-  // ============================================================================
-  
+  // Calculate metrics
   const totalRevenueAtRisk = audit.annual_revenue_at_risk ?? 0;
-  const totalARR = audit.total_arr ?? 10_000_000; // Default to $10M ARR if not set
-  const vertical = audit.company_vertical ?? 'DevTools';
-  
-  // Financial Impact
-  const financialImpact = calculateFinancialImpact(totalRevenueAtRisk, totalARR);
-  
-  // Priority Matrix
-  const priorityTiers = groupByPriority(anomalies);
-  
-  // Industry Benchmark
-  const benchmark = calculateBenchmark(totalRevenueAtRisk, totalARR, vertical);
-  
-  // Leakage Velocity
-  const previousAuditDate = audit.previous_audit_date ? new Date(audit.previous_audit_date) : null;
-  const velocity = calculateVelocity(totalRevenueAtRisk, previousAuditDate);
+  const estimatedRecovery = Math.round(totalRevenueAtRisk * 0.85); // 85% recoverable estimate
+  const monthlyLoss = Math.round(totalRevenueAtRisk / 12);
 
-  // Identify common patterns
-  const patterns: { title: string; description: string; percentage: number }[] = [];
-  
-  const zombieCount = anomalies.filter(a => a.category === "zombie_subscription").length;
-  const pricingCount = anomalies.filter(a => a.category === "pricing_mismatch").length;
-  const unbilledCount = anomalies.filter(a => a.category === "unbilled_usage").length;
-  const duplicateCount = anomalies.filter(a => a.category === "duplicate_charge").length;
-  
-  if (zombieCount > 0 && anomalies.length > 0) {
-    patterns.push({
-      title: "Inactive Subscription Risk",
-      description: "Active subscriptions with zero product activity. Review webhook reliability and churn detection.",
-      percentage: Math.round((zombieCount / anomalies.length) * 100),
-    });
-  }
-  
-  if (pricingCount > 0 && anomalies.length > 0) {
-    patterns.push({
-      title: "Pricing & Payment Issues",
-      description: "Pricing mismatches, failed payments, or refund issues. Review billing configuration and dunning sequences.",
-      percentage: Math.round((pricingCount / anomalies.length) * 100),
-    });
-  }
-  
-  if (unbilledCount > 0 && anomalies.length > 0) {
-    patterns.push({
-      title: "Billing Gap Issues",
-      description: "Usage events not properly invoiced. Review metering pipeline and invoice generation.",
-      percentage: Math.round((unbilledCount / anomalies.length) * 100),
-    });
-  }
-  
-  if (duplicateCount > 0 && anomalies.length > 0) {
-    patterns.push({
-      title: "Duplicate & Dispute Risk",
-      description: "Duplicate charges or disputed transactions. Implement idempotency keys and review charge logic.",
-      percentage: Math.round((duplicateCount / anomalies.length) * 100),
-    });
-  }
+  // Calculate category breakdown for chart
+  const categoryBreakdown = anomalies.reduce(
+    (acc, anomaly) => {
+      const category = anomaly.category as AnomalyCategory;
+      if (!acc[category]) {
+        acc[category] = 0;
+      }
+      acc[category] += anomaly.annual_impact ?? 0;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+
+  const chartData = Object.entries(categoryBreakdown)
+    .map(([category, value]) => ({
+      label:
+        categoryConfig[category]?.label ?? categoryConfig.other.label,
+      value,
+      color:
+        categoryConfig[category]?.chartColor ?? categoryConfig.other.chartColor,
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 6);
+
+  // Separate anomalies by action needed
+  const needsActionAnomalies = anomalies.filter(
+    (a) => a.status === "detected" || a.status === "open"
+  );
+
+  // Financial metrics for summary
+  const vyntAnnualCost = 60000; // Placeholder
+  const netBenefitYear1 = estimatedRecovery - vyntAnnualCost;
+  const roi = netBenefitYear1 / vyntAnnualCost;
+  const paybackMonths =
+    estimatedRecovery > 0 ? (vyntAnnualCost / estimatedRecovery) * 12 : 0;
+
+  // Mock trend data for area chart
+  const trendLabels = ["Mar 3", "Mar 22", "Feb 23", "Mar 17", "Mar 1", "Mar 14"];
+  const trendData = [2500, 3200, 2800, 4100, 3800, 4500];
 
   return (
-    <div className="space-y-8 print:space-y-6">
-      {/* Header Actions */}
-      <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
-        <Button asChild variant="outline" className="border-slate-300">
-          <Link href="/dashboard">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to My Audits
+    <div className="space-y-6">
+      {/* Page Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <Link
+            href="/dashboard"
+            className="mb-2 flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            All audits
           </Link>
+          <h1 className="text-3xl font-semibold text-slate-900">Your audit</h1>
+        </div>
+        <Button variant="outline">
+          <Download className="h-4 w-4" />
+          Export audit
         </Button>
-
-        <ExportPdfButton />
       </div>
 
-      {/* Audit Summary (Header + Executive Summary + Breakdown) */}
-      <AuditSummary
-        audit={{
-          ...audit,
-          organization_name: organization?.name,
-        }}
-        categoryBreakdown={categoryBreakdown}
-      />
-
-      {/* 🔴 PRIORITY 1: Financial Impact Summary */}
-      <section className="print:break-inside-avoid">
-        <FinancialImpactSummary data={financialImpact} />
-      </section>
-
-      {/* AI Executive Summary */}
-      {audit.ai_insights && (
-        <section className="print:break-inside-avoid">
-          <div className="rounded-xl border-2 border-blue-200 bg-blue-50 p-6">
-            <h2 className="text-xl font-bold text-blue-900 mb-3 flex items-center gap-2">
-              <Sparkles className="h-5 w-5" />
-              AI Executive Summary
-            </h2>
-            <p className="text-blue-800 leading-relaxed whitespace-pre-wrap">
-              {audit.ai_insights}
+      {/* KPI Cards */}
+      <div className="grid grid-cols-4 gap-4">
+        <Card className="border-slate-200">
+          <CardContent className="pt-4">
+            <p className="text-sm text-slate-500">Total anomalies</p>
+            <p className="mt-1 text-3xl font-semibold text-slate-900">
+              {audit.total_anomalies ?? 0}
             </p>
-          </div>
-        </section>
-      )}
-
-      {/* 🟡 PRIORITY 2: Recovery Priority Matrix */}
-      <section className="print:break-inside-avoid">
-        <RecoveryPriorityMatrix tiers={priorityTiers} />
-      </section>
-
-      {/* 🟢 PRIORITY 5: Industry Benchmarking */}
-      <section className="print:break-inside-avoid">
-        <IndustryBenchmark data={benchmark} vertical={vertical} />
-      </section>
-
-      {/* 🟢 PRIORITY 6: Leakage Velocity */}
-      <section className="print:break-inside-avoid">
-        <LeakageVelocity data={velocity} />
-      </section>
-
-      {/* Top Issues Section with Enhanced Root Cause */}
-      {topIssues.length > 0 && (
-        <section>
-          <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
-            <Target className="h-5 w-5 text-slate-600" />
-            Top {topIssues.length} Issues (by Financial Impact)
-          </h2>
-          
-          <div className="space-y-6">
-            {topIssues.map((anomaly, index) => {
-              const catConfig = categoryConfig[anomaly.category] ?? categoryConfig.other;
-              const confConfig = confidenceConfig[anomaly.confidence];
-              const Icon = catConfig.icon;
-              const rootCause = getRootCauseTemplate(anomaly);
-              const confidenceScore = (anomaly as { confidence_score?: number }).confidence_score ?? 
-                (anomaly.confidence === 'high' ? 90 : anomaly.confidence === 'medium' ? 70 : 50);
-              
-              return (
-                <div key={anomaly.id} className="rounded-xl border border-slate-200 bg-white overflow-hidden print:break-inside-avoid">
-                  {/* Issue Header */}
-                  <div className="flex items-center justify-between px-6 py-4 bg-slate-50 border-b border-slate-200">
-                    <div className="flex items-center gap-4">
-                      <span className="flex items-center justify-center w-8 h-8 rounded-full bg-slate-900 text-white text-sm font-bold">
-                        {index + 1}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <div className={`rounded-lg p-1.5 ${catConfig.color}`}>
-                          <Icon className="h-4 w-4 text-white" />
-                        </div>
-                        <span className="font-semibold text-slate-900">{catConfig.label}</span>
-                      </div>
-                      {anomaly.customer_id && (
-                        <span className="text-sm text-slate-500">
-                          — {formatCustomerDisplay(
-                            anomaly.customer_id,
-                            (anomaly as { customer_name?: string }).customer_name,
-                            (anomaly as { customer_tier?: string }).customer_tier
-                          )}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <ConfidenceBadge score={confidenceScore} />
-                      <span className="text-lg font-bold text-rose-600">
-                        {formatCurrency(anomaly.annual_impact)}/yr
-                      </span>
-                    </div>
-                  </div>
-                  
-                  {/* Issue Body */}
-                  <div className="px-6 py-5 space-y-4">
-                    <div>
-                      <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Description</h4>
-                      <p className="text-slate-700">{anomaly.description}</p>
-                    </div>
-                    
-                    {anomaly.monthly_impact && (
-                      <div className="flex gap-8">
-                        <div>
-                          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Monthly Impact</h4>
-                          <p className="text-slate-900 font-semibold">{formatCurrency(anomaly.monthly_impact)}/mo</p>
-                        </div>
-                        <div>
-                          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Annual Impact</h4>
-                          <p className="text-rose-600 font-semibold">{formatCurrency(anomaly.annual_impact)}</p>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* 🟢 PRIORITY 7: Enhanced Root Cause */}
-                    <EnhancedRootCause rootCause={rootCause} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          
-          {anomalies.length > 5 && (
-            <p className="text-center text-sm text-slate-500 mt-4">
-              + {anomalies.length - 5} additional anomalies detected (see full list below)
+          </CardContent>
+        </Card>
+        <Card className="border-slate-200">
+          <CardContent className="pt-4">
+            <p className="text-sm text-slate-500">Estimated Recovery</p>
+            <p className="mt-1 text-3xl font-semibold text-emerald-600">
+              {formatCurrency(estimatedRecovery)}
             </p>
-          )}
-        </section>
-      )}
+          </CardContent>
+        </Card>
+        <Card className="border-slate-200">
+          <CardContent className="pt-4">
+            <p className="text-sm text-slate-500">Annual Revenue at Risk</p>
+            <p className="mt-1 text-3xl font-semibold text-rose-600">
+              {formatCurrency(totalRevenueAtRisk)}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="border-slate-200">
+          <CardContent className="pt-4">
+            <p className="text-sm text-slate-500">Avg. Detection Time</p>
+            <p className="mt-1 text-3xl font-semibold text-slate-900">
+              4-7<span className="text-lg font-normal text-slate-500">months</span>
+            </p>
+          </CardContent>
+        </Card>
+      </div>
 
-      {/* Common Patterns */}
-      {patterns.length > 0 && (
-        <section>
-          <h2 className="text-xl font-bold text-slate-900 mb-4">Common Patterns Identified</h2>
-          
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {patterns.map((pattern, index) => (
-              <div key={index} className="rounded-xl border border-slate-200 bg-white p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-semibold text-slate-900">{pattern.title}</h3>
-                  <span className="text-sm font-bold text-slate-600">{pattern.percentage}%</span>
+      {/* Tabs */}
+      <Tabs defaultValue="overview" className="space-y-6">
+        <TabsList className="bg-transparent border-b border-slate-200 rounded-none p-0 h-auto">
+          <TabsTrigger
+            value="overview"
+            className="rounded-none border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3"
+          >
+            Overview
+          </TabsTrigger>
+          <TabsTrigger
+            value="needs-action"
+            className="rounded-none border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3"
+          >
+            Needs action
+          </TabsTrigger>
+          <TabsTrigger
+            value="all-anomalies"
+            className="rounded-none border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3"
+          >
+            All anomalies
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Overview Tab */}
+        <TabsContent value="overview" className="space-y-6">
+          {/* Row 1: Financial Summary + Industry Benchmarking */}
+          <div className="grid grid-cols-2 gap-6">
+            {/* Financial Impact Summary */}
+            <Card className="border-slate-200">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base font-semibold">
+                  Financial Impact Summary
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="rounded-lg border border-slate-200 p-4">
+                    <p className="text-xs text-slate-500">Total Revenue at Risk</p>
+                    <p className="mt-1 text-2xl font-semibold text-rose-600">
+                      {formatCurrency(totalRevenueAtRisk)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">85%</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 p-4">
+                    <p className="text-xs text-slate-500">Estimated Recoverable</p>
+                    <p className="mt-1 text-2xl font-semibold text-emerald-600">
+                      {formatCurrency(estimatedRecovery)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">85%</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 p-4">
+                    <p className="text-xs text-slate-500">Vynt Annual Cost</p>
+                    <p className="mt-1 text-2xl font-semibold text-slate-900">
+                      {formatCurrency(vyntAnnualCost)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">85%</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 p-4">
+                    <p className="text-xs text-slate-500">Net Benefit Year 1</p>
+                    <p
+                      className={`mt-1 text-2xl font-semibold ${netBenefitYear1 >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+                    >
+                      {formatCurrency(netBenefitYear1)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 p-4">
+                    <p className="text-xs text-slate-500">ROI</p>
+                    <p
+                      className={`mt-1 text-2xl font-semibold ${roi >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+                    >
+                      {roi.toFixed(1)}x
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">months</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 p-4">
+                    <p className="text-xs text-slate-500">Payback Period</p>
+                    <p className="mt-1 text-2xl font-semibold text-slate-900">
+                      {paybackMonths.toFixed(1)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">months</p>
+                  </div>
                 </div>
-                <div className="w-full bg-slate-100 rounded-full h-2 mb-3">
-                  <div 
-                    className="bg-slate-900 h-2 rounded-full" 
-                    style={{ width: `${pattern.percentage}%` }}
-                  />
-                </div>
-                <p className="text-sm text-slate-600">{pattern.description}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+              </CardContent>
+            </Card>
 
-      {/* Full Anomaly List */}
-      {anomalies.length > 0 && (
-        <section className="print:hidden">
-          <h2 className="text-xl font-bold text-slate-900 mb-4">All Detected Anomalies</h2>
-          <AnomalyTable anomalies={anomalies} />
-        </section>
-      )}
-
-      {/* Recommended Next Steps - Based on ACTUAL High Priority Anomalies */}
-      <section className="print:break-inside-avoid">
-        <h2 className="text-xl font-bold text-slate-900 mb-4">🔥 Hot Fixes Required</h2>
-        
-        {/* HIGH PRIORITY - Actual anomalies */}
-        {priorityTiers[0].anomalies.length > 0 && (
-          <div className="mb-6 rounded-xl border-2 border-rose-300 bg-rose-50 p-5">
-            <h3 className="font-bold text-rose-800 mb-3 flex items-center gap-2">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-rose-600 text-xs text-white">
-                {priorityTiers[0].anomalies.length}
-              </span>
-              ⚡ IMMEDIATE ACTION (This Week) - {formatCurrency(priorityTiers[0].totalImpact)} at risk
-            </h3>
-            <ul className="space-y-3 text-sm">
-              {priorityTiers[0].anomalies.slice(0, 5).map((anomaly, idx) => (
-                <li key={anomaly.id || idx} className="flex items-start gap-2 text-rose-800">
-                  <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded bg-rose-200 text-xs font-bold">
-                    {idx + 1}
-                  </span>
+            {/* Industry Benchmarking */}
+            <Card className="border-slate-200">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
                   <div>
-                    <span className="font-semibold">
-                      {categoryConfig[anomaly.category]?.label || anomaly.category}
-                    </span>
-                    <span className="text-rose-600"> — {formatCurrency(anomaly.annual_impact)}/yr</span>
-                    <p className="text-rose-700 mt-0.5">{anomaly.recommendation || `Investigate ${formatCustomerDisplay(anomaly.customer_id, null, null)}`}</p>
+                    <CardTitle className="text-base font-semibold">
+                      Industry Benchmarking
+                    </CardTitle>
+                    <p className="text-sm text-slate-500">
+                      Total for the last 3 months
+                    </p>
                   </div>
-                </li>
-              ))}
-              {priorityTiers[0].anomalies.length > 5 && (
-                <li className="text-rose-600 italic ml-7">
-                  + {priorityTiers[0].anomalies.length - 5} more high-priority issues
-                </li>
-              )}
-            </ul>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <AreaChartWrapper data={trendData} labels={trendLabels} />
+              </CardContent>
+            </Card>
           </div>
-        )}
 
-        <div className="grid gap-4 md:grid-cols-2">
-          {/* MEDIUM PRIORITY */}
-          <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-5">
-            <h3 className="font-bold text-amber-800 mb-3 flex items-center gap-2">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500 text-xs text-white">
-                {priorityTiers[1].anomalies.length}
-              </span>
-              📅 This Month - {formatCurrency(priorityTiers[1].totalImpact)}
-            </h3>
-            {priorityTiers[1].anomalies.length > 0 ? (
-              <ul className="space-y-2 text-sm text-amber-700">
-                {priorityTiers[1].anomalies.slice(0, 3).map((anomaly, idx) => (
-                  <li key={anomaly.id || idx}>
-                    • {categoryConfig[anomaly.category]?.label}: {formatCurrency(anomaly.annual_impact)}
-                  </li>
-                ))}
-                {priorityTiers[1].anomalies.length > 3 && (
-                  <li className="italic">+ {priorityTiers[1].anomalies.length - 3} more</li>
-                )}
-              </ul>
-            ) : (
-              <p className="text-sm text-amber-600 italic">No medium-priority issues</p>
-            )}
-          </div>
-          
-          {/* LOW PRIORITY */}
-          <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-5">
-            <h3 className="font-bold text-emerald-800 mb-3 flex items-center gap-2">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-xs text-white">
-                {priorityTiers[2].anomalies.length}
-              </span>
-              🎯 Next Quarter - {formatCurrency(priorityTiers[2].totalImpact)}
-            </h3>
-            {priorityTiers[2].anomalies.length > 0 ? (
-              <ul className="space-y-2 text-sm text-emerald-700">
-                {priorityTiers[2].anomalies.slice(0, 3).map((anomaly, idx) => (
-                  <li key={anomaly.id || idx}>
-                    • {categoryConfig[anomaly.category]?.label}: {formatCurrency(anomaly.annual_impact)}
-                  </li>
-                ))}
-                {priorityTiers[2].anomalies.length > 3 && (
-                  <li className="italic">+ {priorityTiers[2].anomalies.length - 3} more</li>
-                )}
-              </ul>
-            ) : (
-              <p className="text-sm text-emerald-600 italic">No low-priority issues</p>
-            )}
-          </div>
-        </div>
+          {/* Row 2: Leakage Velocity + Category Breakdown */}
+          <div className="grid grid-cols-3 gap-6">
+            {/* Leakage Velocity */}
+            <Card className="border-slate-200">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base font-semibold">
+                  Leakage Velocity
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col items-center justify-center py-8">
+                <p className="text-sm text-slate-500">Current Monthly Loss:</p>
+                <p className="mt-2 text-4xl font-bold text-rose-600">
+                  {formatCurrency(monthlyLoss)}
+                </p>
+                <p className="mt-1 text-sm text-slate-400">/ month</p>
+              </CardContent>
+            </Card>
 
-        {/* Strategic Recommendations */}
-        <div className="mt-4 rounded-xl border border-slate-200 bg-white p-5">
-          <h3 className="font-semibold text-slate-900 mb-3">📋 Strategic Recommendations</h3>
-          <ul className="space-y-2 text-sm text-slate-700">
-            <li>• <strong>Week 1:</strong> Address all {priorityTiers[0].anomalies.length} high-priority anomalies ({formatCurrency(priorityTiers[0].totalImpact)} recovery potential)</li>
-            <li>• <strong>Week 2-4:</strong> Fix root causes for {priorityTiers[1].anomalies.length} medium-priority issues</li>
-            <li>• <strong>Ongoing:</strong> Implement real-time monitoring to prevent future leakage</li>
-          </ul>
-        </div>
-      </section>
-
-      {/* Methodology */}
-      <section className="print:break-inside-avoid">
-        <h2 className="text-xl font-bold text-slate-900 mb-4">Methodology</h2>
-        
-        <div className="grid gap-6 md:grid-cols-2">
-          <div className="rounded-xl border border-slate-200 bg-white p-5">
-            <h3 className="font-semibold text-slate-900 mb-3">Data Sources Analyzed</h3>
-            <ul className="space-y-2 text-sm text-slate-600">
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                Stripe Payment Records
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                Product Usage Logs
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                Customer Account Status
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                Invoice and Billing History
-              </li>
-            </ul>
+            {/* Breakdown by Category */}
+            <Card className="col-span-2 border-slate-200">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base font-semibold">
+                  Breakdown by Category
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <BarChartWrapper data={chartData} />
+              </CardContent>
+            </Card>
           </div>
-          
-          <div className="rounded-xl border border-slate-200 bg-white p-5">
-            <h3 className="font-semibold text-slate-900 mb-3">Analysis Process</h3>
-            <ol className="space-y-2 text-sm text-slate-600 list-decimal list-inside">
-              <li>Cross-reference customer IDs between billing and product data</li>
-              <li>Identify discrepancies (active billing with no usage, usage with no billing)</li>
-              <li>Detect payment failures and churn risk patterns</li>
-              <li>Confidence scoring based on data quality</li>
-            </ol>
-          </div>
-        </div>
-      </section>
+        </TabsContent>
 
-      {/* Footer */}
-      <div className="pt-8 border-t border-slate-200 text-center text-sm text-slate-500">
-        <p>This audit was performed by <strong className="text-slate-900">Vynt</strong></p>
-        <p className="text-slate-400">Revenue Observability for Modern SaaS</p>
-      </div>
+        {/* Needs Action Tab */}
+        <TabsContent value="needs-action" className="space-y-4">
+          <AnomalyTableSection anomalies={needsActionAnomalies} />
+        </TabsContent>
+
+        {/* All Anomalies Tab */}
+        <TabsContent value="all-anomalies" className="space-y-4">
+          <AnomalyTableSection anomalies={anomalies} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
+
+type AnomalyTableSectionProps = {
+  anomalies: Anomaly[];
+};
+
+function AnomalyTableSection({ anomalies }: AnomalyTableSectionProps) {
+  const formatCurrency = (value: number | null) => {
+    if (value === null) return "$0";
+    return value.toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 0,
+    });
+  };
+
+  if (anomalies.length === 0) {
+    return (
+      <div className="flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 py-12 text-sm text-slate-500">
+        No anomalies found.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200">
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead>Category</TableHead>
+            <TableHead>Customer ID</TableHead>
+            <TableHead>Description</TableHead>
+            <TableHead>Confidence</TableHead>
+            <TableHead className="text-right">Monthly Impact</TableHead>
+            <TableHead className="text-right">Annual Impact</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {anomalies.slice(0, 10).map((anomaly) => (
+            <TableRow key={anomaly.id}>
+              <TableCell>
+                <Badge
+                  variant="secondary"
+                  className={
+                    categoryConfig[anomaly.category]?.color ??
+                    categoryConfig.other.color
+                  }
+                >
+                  {categoryConfig[anomaly.category]?.label ??
+                    categoryConfig.other.label}
+                </Badge>
+              </TableCell>
+              <TableCell className="font-mono text-sm text-slate-600">
+                {anomaly.customer_id?.slice(0, 16) ?? "—"}
+              </TableCell>
+              <TableCell className="max-w-xs truncate text-slate-600">
+                {anomaly.description ?? "—"}
+              </TableCell>
+              <TableCell>
+                <Badge
+                  variant={
+                    anomaly.confidence === "high"
+                      ? "default"
+                      : anomaly.confidence === "medium"
+                        ? "secondary"
+                        : "outline"
+                  }
+                >
+                  {anomaly.confidence}
+                </Badge>
+              </TableCell>
+              <TableCell className="text-right font-medium">
+                {formatCurrency(anomaly.monthly_impact)}
+              </TableCell>
+              <TableCell className="text-right font-medium text-rose-600">
+                {formatCurrency(anomaly.annual_impact)}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {anomalies.length > 10 && (
+        <div className="border-t border-slate-200 px-4 py-3 text-center text-sm text-slate-500">
+          Showing 10 of {anomalies.length} anomalies
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default AuditDetailPage;
