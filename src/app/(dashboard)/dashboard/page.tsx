@@ -52,7 +52,7 @@ const DashboardPage = async () => {
     <div className="space-y-6">
       {/* Page Header */}
       <div>
-        <h1 className="text-3xl font-semibold text-slate-900">Audits</h1>
+        <h1 className="text-3xl font-semibold text-[#1C1917]">Audits</h1>
       </div>
 
       {/* Audits List with Filters and Pagination */}

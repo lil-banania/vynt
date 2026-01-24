@@ -95,7 +95,7 @@ export function AuditsList({ audits }: AuditsListProps) {
       />
 
       {/* Table */}
-      <div className="rounded-lg border border-slate-200">
+      <div className="rounded-lg border border-[#E7E5E4]">
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
@@ -116,7 +116,7 @@ export function AuditsList({ audits }: AuditsListProps) {
 
       {/* Pagination */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-[#78716C]">
           Showing {filteredAudits.length === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1} to{" "}
           {Math.min(currentPage * itemsPerPage, filteredAudits.length)} of{" "}
           {filteredAudits.length} results

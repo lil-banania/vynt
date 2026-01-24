@@ -65,7 +65,7 @@ export function AuditsTableBody({ audits }: AuditsTableBodyProps) {
     return (
       <TableBody>
         <TableRow>
-          <TableCell colSpan={7} className="h-32 text-center text-slate-500">
+          <TableCell colSpan={7} className="h-32 text-center text-[#78716C]">
             No audits yet. Click &quot;New audit&quot; to get started.
           </TableCell>
         </TableRow>
@@ -80,12 +80,12 @@ export function AuditsTableBody({ audits }: AuditsTableBodyProps) {
           <TableCell onClick={(e) => e.stopPropagation()}>
             <input type="checkbox" className="h-4 w-4 rounded border-slate-300" />
           </TableCell>
-          <TableCell className="font-medium text-slate-900">
+          <TableCell className="font-medium text-[#1C1917]">
             <Link href={`/audit/${audit.id}`} className="block w-full">
               {formatAuditId(audit.id)}
             </Link>
           </TableCell>
-          <TableCell className="text-slate-600">
+          <TableCell className="text-[#78716C]">
             <Link href={`/audit/${audit.id}`} className="block w-full">
               {formatDateRange(audit.audit_period_start, audit.audit_period_end)}
             </Link>
@@ -95,12 +95,12 @@ export function AuditsTableBody({ audits }: AuditsTableBodyProps) {
               <StatusBadge status={audit.status} />
             </Link>
           </TableCell>
-          <TableCell className="text-right text-slate-900">
+          <TableCell className="text-right text-[#1C1917]">
             <Link href={`/audit/${audit.id}`} className="block w-full">
               {audit.total_anomalies ?? 0}
             </Link>
           </TableCell>
-          <TableCell className="text-right font-medium text-slate-900">
+          <TableCell className="text-right font-medium text-[#1C1917]">
             <Link href={`/audit/${audit.id}`} className="block w-full">
               {formatCurrency(audit.annual_revenue_at_risk)}
             </Link>
