@@ -33,10 +33,10 @@ const statusConfig: Record<string, { label: string; color: string }> = {
   recovered: { label: "Recovered", color: "bg-[#15803D] text-white" },
 };
 
-const confidenceConfig: Record<string, { label: string; color: string }> = {
-  high: { label: "High", color: "bg-emerald-100 text-emerald-800 border-emerald-200" },
-  medium: { label: "Medium", color: "bg-amber-100 text-amber-800 border-amber-200" },
-  low: { label: "Low", color: "bg-slate-100 text-slate-800 border-slate-200" },
+const confidenceLabelMap: Record<string, string> = {
+  high: "High",
+  medium: "Medium",
+  low: "Low",
 };
 
 export function AnomalyTable({ anomalies }: AnomalyTableProps) {
@@ -173,7 +173,6 @@ export function AnomalyTable({ anomalies }: AnomalyTableProps) {
               <TableRow className="hover:bg-transparent border-[#E7E5E4]">
                 <TableHead className="text-sm font-medium text-[#0A0A0A]">Category</TableHead>
                 <TableHead className="text-sm font-medium text-[#0A0A0A]">Customer ID</TableHead>
-                <TableHead className="text-sm font-medium text-[#0A0A0A]">Description</TableHead>
                 <TableHead className="text-sm font-medium text-[#0A0A0A]">Status</TableHead>
                 <TableHead className="text-sm font-medium text-[#0A0A0A]">Confidence</TableHead>
                 <TableHead className="text-right text-sm font-medium text-[#0A0A0A]">Annual Impact</TableHead>
@@ -183,7 +182,7 @@ export function AnomalyTable({ anomalies }: AnomalyTableProps) {
             <TableBody>
               {currentAnomalies.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-sm text-[#78716C] py-8">
+                  <TableCell colSpan={6} className="text-center text-sm text-[#78716C] py-8">
                     No anomalies match the selected filters.
                   </TableCell>
                 </TableRow>
@@ -191,7 +190,7 @@ export function AnomalyTable({ anomalies }: AnomalyTableProps) {
                 currentAnomalies.map((anomaly) => {
                   const config = categoryConfig[anomaly.category] || categoryConfig.other;
                   const status = statusConfig[anomaly.status || "detected"] || statusConfig.detected;
-                  const confidence = confidenceConfig[anomaly.confidence] || confidenceConfig.low;
+                  const confidenceLabel = confidenceLabelMap[anomaly.confidence] || anomaly.confidence;
 
                   return (
                     <TableRow key={anomaly.id} className="border-[#E7E5E4]">
@@ -203,30 +202,26 @@ export function AnomalyTable({ anomalies }: AnomalyTableProps) {
                       <TableCell className="font-mono text-sm text-[#78716C]">
                         {anomaly.customer_id?.slice(0, 16) ?? "—"}
                       </TableCell>
-                      <TableCell className="max-w-xs truncate text-sm text-[#78716C]">
-                        {anomaly.description ?? "—"}
-                      </TableCell>
                       <TableCell>
                         <Badge className={`${status.color} border-transparent`}>
                           {status.label}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={`${confidence.color}`}>
-                          {confidence.label}
-                        </Badge>
+                        <span className="text-sm font-medium text-[#0A0A0A]">
+                          {confidenceLabel}
+                        </span>
                       </TableCell>
-                      <TableCell className="text-right font-medium text-[#DC2626]">
+                      <TableCell className="text-right font-semibold text-[#0A0A0A]">
                         {formatCurrency(anomaly.annual_impact)}
                       </TableCell>
                       <TableCell>
-                        <Button
-                          variant="outline"
-                          size="sm"
+                        <button
                           onClick={() => setSelectedAnomaly(anomaly)}
+                          className="text-sm font-medium text-[#0A0A0A] underline hover:text-[#78716C] transition-colors"
                         >
-                          View Details
-                        </Button>
+                          View details
+                        </button>
                       </TableCell>
                     </TableRow>
                   );

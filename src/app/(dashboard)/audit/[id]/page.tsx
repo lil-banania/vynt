@@ -227,36 +227,36 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
       </div>
 
       {/* KPI Cards - Compact Figma design */}
-      <div className="grid grid-cols-4 gap-[10px]">
+      <div className="grid grid-cols-4 gap-3">
         <Card className="border-[#E7E5E4] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]">
-          <CardContent className="p-4">
-            <p className="text-base font-normal leading-6 text-[#78716C]">Total anomalies</p>
-            <p className="mt-2 text-[30px] font-normal leading-9 text-[#1C1917]">
+          <CardContent className="p-3">
+            <p className="text-sm font-normal leading-5 text-[#78716C]">Total anomalies</p>
+            <p className="mt-1 text-2xl font-semibold text-[#1C1917]">
               {audit.total_anomalies ?? 0}
             </p>
           </CardContent>
         </Card>
         <Card className="border-[#E7E5E4] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]">
-          <CardContent className="p-4">
-            <p className="text-base font-normal leading-6 text-[#78716C]">Estimated Recovery</p>
-            <p className="mt-2 text-[30px] font-normal leading-9 text-[#15803D]">
+          <CardContent className="p-3">
+            <p className="text-sm font-normal leading-5 text-[#78716C]">Estimated Recovery</p>
+            <p className="mt-1 text-2xl font-semibold text-[#15803D]">
               {formatCurrency(estimatedRecovery)}
             </p>
           </CardContent>
         </Card>
         <Card className="border-[#E7E5E4] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]">
-          <CardContent className="p-4">
-            <p className="text-base font-normal leading-6 text-[#78716C]">Annual Revenue at Risk</p>
-            <p className="mt-2 text-[30px] font-normal leading-9 text-[#991B1B]">
+          <CardContent className="p-3">
+            <p className="text-sm font-normal leading-5 text-[#78716C]">Annual Revenue at Risk</p>
+            <p className="mt-1 text-2xl font-semibold text-[#991B1B]">
               {formatCurrency(totalRevenueAtRisk)}
             </p>
           </CardContent>
         </Card>
         <Card className="border-[#E7E5E4] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]">
-          <CardContent className="p-4">
-            <p className="text-base font-normal leading-6 text-[#78716C]">Avg. Detection Time</p>
-            <p className="mt-2 text-[30px] font-normal leading-9 text-[#1C1917]">
-              4-7<span className="text-base font-medium text-[#78716C]">months</span>
+          <CardContent className="p-3">
+            <p className="text-sm font-normal leading-5 text-[#78716C]">Avg. Detection Time</p>
+            <p className="mt-1 text-2xl font-semibold text-[#1C1917]">
+              4-7<span className="text-sm font-medium text-[#78716C]">months</span>
             </p>
           </CardContent>
         </Card>
@@ -267,19 +267,19 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
         <TabsList className="bg-transparent border-b border-slate-200 rounded-none p-0 h-auto">
           <TabsTrigger
             value="overview"
-            className="rounded-none border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3"
+            className="rounded-none bg-transparent border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3 shadow-none"
           >
             Overview
           </TabsTrigger>
           <TabsTrigger
             value="needs-action"
-            className="rounded-none border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3"
+            className="rounded-none bg-transparent border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3 shadow-none"
           >
             Needs action
           </TabsTrigger>
           <TabsTrigger
             value="all-anomalies"
-            className="rounded-none border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3"
+            className="rounded-none bg-transparent border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3 shadow-none"
           >
             All anomalies
           </TabsTrigger>
