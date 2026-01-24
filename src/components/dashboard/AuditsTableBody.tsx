@@ -48,7 +48,7 @@ const formatAuditId = (id: string) => {
 const StatusBadge = ({ status }: { status: Audit["status"] }) => {
   if (status === "published") {
     return (
-      <Badge className="bg-orange-500 hover:bg-orange-500 text-white border-0">
+      <Badge className="bg-[#15803D] hover:bg-[#15803D] text-white border-0">
         Published
       </Badge>
     );

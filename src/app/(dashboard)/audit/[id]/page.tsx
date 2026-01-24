@@ -20,8 +20,9 @@ import { Anomaly, Audit, Profile, AnomalyCategory } from "@/lib/types/database";
 // Charts
 import { AreaChartWrapper } from "./AreaChartWrapper";
 import { BarChartWrapper } from "./BarChartWrapper";
+import { IndustryBenchmarking } from "./IndustryBenchmarking";
 import { ExportAuditButton } from "@/components/audit/ExportAuditButton";
-import { AnomalyCardList } from "@/components/audit/AnomalyCardList";
+import { NeedsActionLayout } from "@/components/audit/NeedsActionLayout";
 import { AnomalyTable } from "@/components/audit/AnomalyTable";
 
 type AuditDetailPageProps = {
@@ -30,7 +31,7 @@ type AuditDetailPageProps = {
   }>;
 };
 
-type AuditWithExtras = Audit & {
+type AuditWithExtras = Audit & { 
   ai_insights?: string | null;
   total_arr?: number | null;
 };
@@ -201,8 +202,10 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
     estimatedRecovery > 0 ? (vyntAnnualCost / estimatedRecovery) * 12 : 0;
 
   // Mock trend data for area chart
-  const trendLabels = ["Mar 3", "Mar 22", "Feb 23", "Mar 17", "Mar 1", "Mar 14"];
-  const trendData = [2500, 3200, 2800, 4100, 3800, 4500];
+  const trendLabels3Mo = ["Mar 3", "Mar 22", "Feb 23", "Mar 17", "Mar 1", "Mar 14"];
+  const trendData3Mo = [2500, 3200, 2800, 4100, 3800, 4500];
+  const trendLabelsYear = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const trendDataYear = [2000, 2200, 2500, 3200, 2800, 4100, 3800, 4500, 4200, 3900, 4300, 4600];
 
   return (
     <div className="space-y-6">
@@ -255,7 +258,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
             </p>
           </CardContent>
         </Card>
-      </div>
+          </div>
 
       {/* Tabs */}
       <Tabs defaultValue="overview" className="space-y-6">
@@ -299,21 +302,21 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
                       {formatCurrency(totalRevenueAtRisk)}
                     </p>
                     <p className="mt-1 text-xs text-slate-400">85%</p>
-                  </div>
+                        </div>
                   <div className="rounded-lg border border-slate-200 p-4">
                     <p className="text-xs text-slate-500">Estimated Recoverable</p>
                     <p className="mt-1 text-2xl font-semibold text-emerald-600">
                       {formatCurrency(estimatedRecovery)}
                     </p>
                     <p className="mt-1 text-xs text-slate-400">85%</p>
-                  </div>
+                      </div>
                   <div className="rounded-lg border border-slate-200 p-4">
                     <p className="text-xs text-slate-500">Vynt Annual Cost</p>
                     <p className="mt-1 text-2xl font-semibold text-slate-900">
                       {formatCurrency(vyntAnnualCost)}
                     </p>
                     <p className="mt-1 text-xs text-slate-400">85%</p>
-                  </div>
+                    </div>
                   <div className="rounded-lg border border-slate-200 p-4">
                     <p className="text-xs text-slate-500">Net Benefit Year 1</p>
                     <p
@@ -321,7 +324,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
                     >
                       {formatCurrency(netBenefitYear1)}
                     </p>
-                  </div>
+                    </div>
                   <div className="rounded-lg border border-slate-200 p-4">
                     <p className="text-xs text-slate-500">ROI</p>
                     <p
@@ -343,25 +346,14 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
             </Card>
 
             {/* Industry Benchmarking */}
-            <Card className="border-slate-200">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-base font-semibold">
-                      Industry Benchmarking
-                    </CardTitle>
-                    <p className="text-sm text-slate-500">
-                      Total for the last 3 months
-                    </p>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <AreaChartWrapper data={trendData} labels={trendLabels} />
-              </CardContent>
-            </Card>
+            <IndustryBenchmarking
+              data3Mo={trendData3Mo}
+              labels3Mo={trendLabels3Mo}
+              dataYear={trendDataYear}
+              labelsYear={trendLabelsYear}
+            />
           </div>
-
+          
           {/* Row 2: Leakage Velocity + Category Breakdown */}
           <div className="grid grid-cols-3 gap-6">
             {/* Leakage Velocity */}
@@ -396,7 +388,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
 
         {/* Needs Action Tab */}
         <TabsContent value="needs-action" className="space-y-4">
-          <AnomalyCardList anomalies={needsActionAnomalies} />
+          <NeedsActionLayout anomalies={needsActionAnomalies} />
         </TabsContent>
 
         {/* All Anomalies Tab */}
