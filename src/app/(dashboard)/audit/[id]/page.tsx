@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, Download } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,9 @@ import { Anomaly, Audit, Profile, AnomalyCategory } from "@/lib/types/database";
 // Charts
 import { AreaChartWrapper } from "./AreaChartWrapper";
 import { BarChartWrapper } from "./BarChartWrapper";
+import { ExportAuditButton } from "@/components/audit/ExportAuditButton";
+import { AnomalyCardList } from "@/components/audit/AnomalyCardList";
+import { AnomalyTable } from "@/components/audit/AnomalyTable";
 
 type AuditDetailPageProps = {
   params: Promise<{
@@ -215,10 +218,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
           </Link>
           <h1 className="text-3xl font-semibold text-slate-900">Your audit</h1>
         </div>
-        <Button variant="outline">
-          <Download className="h-4 w-4" />
-          Export audit
-        </Button>
+        <ExportAuditButton />
       </div>
 
       {/* KPI Cards */}
@@ -396,104 +396,16 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
 
         {/* Needs Action Tab */}
         <TabsContent value="needs-action" className="space-y-4">
-          <AnomalyTableSection anomalies={needsActionAnomalies} />
+          <AnomalyCardList anomalies={needsActionAnomalies} />
         </TabsContent>
 
         {/* All Anomalies Tab */}
         <TabsContent value="all-anomalies" className="space-y-4">
-          <AnomalyTableSection anomalies={anomalies} />
+          <AnomalyTable anomalies={anomalies} pageSize={10} />
         </TabsContent>
       </Tabs>
     </div>
   );
 };
-
-type AnomalyTableSectionProps = {
-  anomalies: Anomaly[];
-};
-
-function AnomalyTableSection({ anomalies }: AnomalyTableSectionProps) {
-  const formatCurrency = (value: number | null) => {
-    if (value === null) return "$0";
-    return value.toLocaleString("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 0,
-    });
-  };
-
-  if (anomalies.length === 0) {
-    return (
-      <div className="flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 py-12 text-sm text-slate-500">
-        No anomalies found.
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-lg border border-slate-200">
-      <Table>
-        <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            <TableHead>Category</TableHead>
-            <TableHead>Customer ID</TableHead>
-            <TableHead>Description</TableHead>
-            <TableHead>Confidence</TableHead>
-            <TableHead className="text-right">Monthly Impact</TableHead>
-            <TableHead className="text-right">Annual Impact</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {anomalies.slice(0, 10).map((anomaly) => (
-            <TableRow key={anomaly.id}>
-              <TableCell>
-                <Badge
-                  variant="secondary"
-                  className={
-                    categoryConfig[anomaly.category]?.color ??
-                    categoryConfig.other.color
-                  }
-                >
-                  {categoryConfig[anomaly.category]?.label ??
-                    categoryConfig.other.label}
-                </Badge>
-              </TableCell>
-              <TableCell className="font-mono text-sm text-slate-600">
-                {anomaly.customer_id?.slice(0, 16) ?? "—"}
-              </TableCell>
-              <TableCell className="max-w-xs truncate text-slate-600">
-                {anomaly.description ?? "—"}
-              </TableCell>
-              <TableCell>
-                <Badge
-                  variant={
-                    anomaly.confidence === "high"
-                      ? "default"
-                      : anomaly.confidence === "medium"
-                        ? "secondary"
-                        : "outline"
-                  }
-                >
-                  {anomaly.confidence}
-                </Badge>
-              </TableCell>
-              <TableCell className="text-right font-medium">
-                {formatCurrency(anomaly.monthly_impact)}
-              </TableCell>
-              <TableCell className="text-right font-medium text-rose-600">
-                {formatCurrency(anomaly.annual_impact)}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      {anomalies.length > 10 && (
-        <div className="border-t border-slate-200 px-4 py-3 text-center text-sm text-slate-500">
-          Showing 10 of {anomalies.length} anomalies
-        </div>
-      )}
-    </div>
-  );
-}
 
 export default AuditDetailPage;

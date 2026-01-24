@@ -181,26 +181,36 @@ const DashboardPage = async () => {
               </TableRow>
             ) : (
               audits.map((audit) => (
-                <TableRow key={audit.id}>
-                  <TableCell>
+                <TableRow key={audit.id} className="cursor-pointer hover:bg-slate-50">
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" className="h-4 w-4 rounded border-slate-300" />
                   </TableCell>
                   <TableCell className="font-medium text-slate-900">
-                    {formatAuditId(audit.id)}
+                    <Link href={`/audit/${audit.id}`} className="block w-full">
+                      {formatAuditId(audit.id)}
+                    </Link>
                   </TableCell>
                   <TableCell className="text-slate-600">
-                    {formatDateRange(audit.audit_period_start, audit.audit_period_end)}
+                    <Link href={`/audit/${audit.id}`} className="block w-full">
+                      {formatDateRange(audit.audit_period_start, audit.audit_period_end)}
+                    </Link>
                   </TableCell>
                   <TableCell>
-                    <StatusBadge status={audit.status} />
+                    <Link href={`/audit/${audit.id}`} className="block w-full">
+                      <StatusBadge status={audit.status} />
+                    </Link>
                   </TableCell>
                   <TableCell className="text-right text-slate-900">
-                    {audit.total_anomalies ?? 0}
+                    <Link href={`/audit/${audit.id}`} className="block w-full">
+                      {audit.total_anomalies ?? 0}
+                    </Link>
                   </TableCell>
                   <TableCell className="text-right font-medium text-slate-900">
-                    {formatCurrency(audit.annual_revenue_at_risk)}
+                    <Link href={`/audit/${audit.id}`} className="block w-full">
+                      {formatCurrency(audit.annual_revenue_at_risk)}
+                    </Link>
                   </TableCell>
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon-sm">
