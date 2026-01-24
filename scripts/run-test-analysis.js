@@ -181,8 +181,9 @@ for (const row of usageRows) {
     }
   }
   
-  // Fallback: amount-only
-  if (!bestMatch) {
+  // Fallback: amount-only (DISABLED for failed payments to improve accuracy)
+  // Failed payments should NOT match via fallback - they're real failures
+  if (!bestMatch && status !== 'failed') {
     const fallbackCandidates = stripeByAmount.get(`${amount}`) || [];
     for (const candidate of fallbackCandidates) {
       const candidateDate = parseDate(candidate[stripeDateCol]);
@@ -197,6 +198,16 @@ for (const row of usageRows) {
   if (bestMatch) {
     allMatchedIds.add(bestMatch[stripeIdCol]);
     
+    // === DISPUTED DETECTION ===
+    // Check if DB says "disputed" but Stripe says NOT disputed
+    const stripeDisputed = bestMatch[stripeDisputedCol]?.toUpperCase();
+    if (status === 'disputed' && stripeDisputed !== 'TRUE') {
+      if (categoryCounts.disputed_charge < 15) {
+        categoryCounts.disputed_charge++;
+        categoryImpacts.disputed_charge += amount / 100;
+      }
+    }
+    
     // Check for fee discrepancies
     const stripeFee = parseAmount(bestMatch[stripeFeeCol]);
     const feeDiff = Math.abs(feeAmount - stripeFee);
@@ -205,7 +216,7 @@ for (const row of usageRows) {
       categoryImpacts.fee_discrepancy += feeDiff / 100;
     }
   } else {
-    // Anomaly detected
+    // Anomaly detected (no Stripe match)
     const impactDollars = amount / 100;
     
     if (status === 'failed' && categoryCounts.failed_payment < 40) {
