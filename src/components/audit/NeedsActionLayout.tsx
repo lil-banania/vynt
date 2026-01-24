@@ -1,9 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Anomaly } from "@/lib/types/database";
 import { AnomalySidePanel } from "./AnomalySidePanel";
 
@@ -20,43 +28,129 @@ const formatCurrency = (value: number | null) => {
   });
 };
 
-const categoryConfig: Record<string, { label: string; color: string }> = {
-  failed_payment: {
-    label: "Failed Payment",
-    color: "bg-red-50 text-red-800 border-red-200",
-  },
-  duplicate_charge: {
-    label: "Duplicate Charge",
-    color: "bg-blue-50 text-blue-800 border-blue-200",
-  },
-  zombie_subscription: {
-    label: "Zombie Subscription",
-    color: "bg-teal-50 text-teal-800 border-teal-200",
-  },
-  unbilled_usage: {
-    label: "Unbilled Usage",
-    color: "bg-yellow-50 text-yellow-800 border-yellow-200",
-  },
-  disputed_charge: {
-    label: "Disputed Charge",
-    color: "bg-green-50 text-green-800 border-green-200",
-  },
-  fee_discrepancy: {
-    label: "Fee Discrepancy",
-    color: "bg-purple-50 text-purple-800 border-purple-200",
-  },
-  pricing_mismatch: {
-    label: "Pricing Mismatch",
-    color: "bg-pink-50 text-pink-800 border-pink-200",
-  },
-  other: {
-    label: "Other",
-    color: "bg-slate-50 text-slate-800 border-slate-200",
-  },
+const categoryConfig: Record<string, { label: string }> = {
+  failed_payment: { label: "Failed Payment" },
+  duplicate_charge: { label: "Duplicate Charge" },
+  zombie_subscription: { label: "Zombie Subscription" },
+  unbilled_usage: { label: "Unbilled Usage" },
+  disputed_charge: { label: "Disputed Charge" },
+  fee_discrepancy: { label: "Fee Discrepancy" },
+  pricing_mismatch: { label: "Pricing Mismatch" },
+  other: { label: "Other" },
 };
 
+function AnomalyTableColumn({
+  title,
+  subtitle,
+  anomalies,
+  onDetailsClick,
+}: {
+  title: string;
+  subtitle: string;
+  anomalies: Anomaly[];
+  onDetailsClick: (anomaly: Anomaly) => void;
+}) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
+  const totalPages = Math.ceil(anomalies.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const displayedAnomalies = anomalies.slice(startIndex, startIndex + itemsPerPage);
+
+  return (
+    <div className="bg-white border border-[#E7E5E4] rounded-lg shadow-sm">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 pt-4 pb-2">
+        <div className="flex-1">
+          <div className="flex items-center gap-1.5">
+            <h3 className="text-base font-medium text-[#0C0A09]">{title}</h3>
+            <Info className="h-4 w-4 text-[#0A0A0A]" />
+          </div>
+          <p className="text-sm text-[#78716C] mt-1.5">{subtitle}</p>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="px-4 pb-6">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-[#E7E5E4]">
+              <TableHead className="w-[25px] px-2"></TableHead>
+              <TableHead className="text-sm font-medium text-[#0A0A0A]">Event type</TableHead>
+              <TableHead className="text-sm font-medium text-[#0A0A0A]">Impact</TableHead>
+              <TableHead className="w-[48px]"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {displayedAnomalies.map((anomaly, index) => {
+              const monthlyImpact = (anomaly.annual_impact ?? 0) / 12;
+              return (
+                <TableRow key={anomaly.id} className="border-[#E7E5E4]">
+                  <TableCell className="px-2 text-sm text-[#0A0A0A]">
+                    {startIndex + index + 1}
+                  </TableCell>
+                  <TableCell>
+                    <Badge className="bg-[#FA6400] border-transparent text-[#FAFAF9]">
+                      {categoryConfig[anomaly.category]?.label ?? "Other"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm text-[#0A0A0A]">
+                        {formatCurrency(monthlyImpact)}/mo
+                      </span>
+                      <span className="text-sm text-[#78716C]">
+                        {formatCurrency(anomaly.annual_impact)}/yr
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs shadow-sm"
+                      onClick={() => onDetailsClick(anomaly)}
+                    >
+                      Details
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+
+        {/* Pagination */}
+        <div className="flex items-center justify-end gap-8 mt-3 pt-3">
+          <div className="text-sm font-medium text-[#0A0A0A]">
+            Page {currentPage} of {totalPages}
+          </div>
+          <div className="flex gap-2">
+            <Button
+              size="icon"
+              variant="outline"
+              className="h-9 w-9 shadow-sm"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="h-6 w-6" />
+            </Button>
+            <Button
+              size="icon"
+              variant="outline"
+              className="h-9 w-9 shadow-sm"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            >
+              <ChevronRight className="h-6 w-6" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function NeedsActionLayout({ anomalies }: NeedsActionLayoutProps) {
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [selectedAnomaly, setSelectedAnomaly] = useState<Anomaly | null>(null);
 
   // Sort by annual impact and take top 10
@@ -82,174 +176,32 @@ export function NeedsActionLayout({ anomalies }: NeedsActionLayoutProps) {
   const commonPatterns = Object.entries(categoryGroups)
     .map(([category, data]) => ({
       category,
-      count: data.count,
-      totalImpact: data.totalImpact,
-      avgImpact: data.totalImpact / data.count,
+      ...data,
     }))
     .sort((a, b) => b.totalImpact - a.totalImpact)
     .slice(0, 5);
 
-  const toggleExpand = (id: string) => {
-    const newExpanded = new Set(expandedIds);
-    if (newExpanded.has(id)) {
-      newExpanded.delete(id);
-    } else {
-      newExpanded.add(id);
-    }
-    setExpandedIds(newExpanded);
-  };
+  // Flatten common patterns into individual anomalies
+  const patternAnomalies = commonPatterns.flatMap((p) => p.anomalies).slice(0, 5);
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-2 gap-5 overflow-clip">
         {/* Left Column: Top Issues */}
-        <Card className="border-[#E7E5E4]">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold text-[#1C1917]">
-              Top Issues by Impact
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {topIssues.map((anomaly, index) => {
-                const isExpanded = expandedIds.has(anomaly.id);
-                
-                return (
-                  <div key={anomaly.id} className="rounded-lg border border-[#E7E5E4] transition-colors hover:bg-slate-50">
-                    {/* Main row */}
-                    <div className="flex items-center justify-between p-4">
-                      <div className="flex items-center gap-4 flex-1">
-                        <button
-                          onClick={() => toggleExpand(anomaly.id)}
-                          className="flex items-center justify-center w-5 h-5 text-[#78716C] hover:text-[#1C1917]"
-                        >
-                          {isExpanded ? (
-                            <ChevronDown className="h-4 w-4" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4" />
-                          )}
-                        </button>
-
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-sm font-medium text-[#1C1917]">
-                              #{index + 1}
-                            </span>
-                            <Badge
-                              variant="outline"
-                              className={`border text-xs ${categoryConfig[anomaly.category]?.color ?? categoryConfig.other.color}`}
-                            >
-                              {categoryConfig[anomaly.category]?.label ?? categoryConfig.other.label}
-                            </Badge>
-                          </div>
-                          <p className="text-xs text-[#78716C] line-clamp-1">
-                            {anomaly.description ?? "Anomaly detected"}
-                          </p>
-                        </div>
-
-                        <div className="text-right">
-                          <p className="text-base font-semibold text-[#DC2626]">
-                            {formatCurrency(anomaly.annual_impact)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Expanded content */}
-                    {isExpanded && (
-                      <div className="px-4 pb-4 border-t border-[#E7E5E4] pt-3">
-                        <div className="space-y-3">
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <p className="text-xs text-[#78716C] mb-1">Root Cause</p>
-                              <p className="text-xs text-[#1C1917]">
-                                {anomaly.root_cause ?? "Analysis pending"}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-[#78716C] mb-1">Recommendation</p>
-                              <p className="text-xs text-[#1C1917]">
-                                {anomaly.recommendation ?? "Review required"}
-                              </p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => setSelectedAnomaly(anomaly)}
-                            className="text-xs font-medium text-[#FA6400] hover:text-[#E65A00]"
-                          >
-                            View Full Details →
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
+        <AnomalyTableColumn
+          title="Top issues"
+          subtitle="By Financial Impact"
+          anomalies={topIssues}
+          onDetailsClick={setSelectedAnomaly}
+        />
 
         {/* Right Column: Common Patterns */}
-        <Card className="border-[#E7E5E4]">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold text-[#1C1917]">
-              Common Patterns Observed
-            </CardTitle>
-            <p className="text-xs text-[#78716C] mt-1">
-              AI-analyzed patterns across your anomalies
-            </p>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {commonPatterns.map((pattern) => (
-                <div
-                  key={pattern.category}
-                  className="rounded-lg border border-[#E7E5E4] p-4"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Badge
-                          variant="outline"
-                          className={`border ${categoryConfig[pattern.category]?.color ?? categoryConfig.other.color}`}
-                        >
-                          {categoryConfig[pattern.category]?.label ?? categoryConfig.other.label}
-                        </Badge>
-                        <span className="text-xs text-[#78716C]">
-                          {pattern.count} occurrence{pattern.count > 1 ? "s" : ""}
-                        </span>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div>
-                          <p className="text-[#78716C]">Total Impact</p>
-                          <p className="font-semibold text-[#DC2626]">
-                            {formatCurrency(pattern.totalImpact)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[#78716C]">Avg. Impact</p>
-                          <p className="font-semibold text-[#1C1917]">
-                            {formatCurrency(pattern.avgImpact)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* AI Analysis placeholder */}
-                  <div className="rounded bg-slate-50 p-3 mt-3">
-                    <p className="text-xs text-[#78716C] italic">
-                      Pattern: This category shows {pattern.count > 3 ? "high" : "moderate"} frequency 
-                      with {pattern.totalImpact > 10000 ? "significant" : "notable"} financial impact. 
-                      {pattern.count > 2 && " Recommend immediate review and systematic correction."}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        <AnomalyTableColumn
+          title="Common Patterns Identified"
+          subtitle="By Financial Impact"
+          anomalies={patternAnomalies}
+          onDetailsClick={setSelectedAnomaly}
+        />
       </div>
 
       <AnomalySidePanel
