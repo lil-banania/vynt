@@ -15,29 +15,10 @@ import {
 import { Anomaly } from "@/lib/types/database";
 import { AnomalySidePanel } from "./AnomalySidePanel";
 import { CommonPatternsColumn } from "./CommonPatternsColumn";
+import { categoryConfig, formatCurrency } from "@/lib/utils/category-config";
 
 type NeedsActionLayoutProps = {
   anomalies: Anomaly[];
-};
-
-const formatCurrency = (value: number | null) => {
-  if (value === null) return "$0";
-  return value.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
-};
-
-const categoryConfig: Record<string, { label: string }> = {
-  failed_payment: { label: "Failed Payment" },
-  duplicate_charge: { label: "Duplicate Charge" },
-  zombie_subscription: { label: "Zombie Subscription" },
-  unbilled_usage: { label: "Unbilled Usage" },
-  disputed_charge: { label: "Disputed Charge" },
-  fee_discrepancy: { label: "Fee Discrepancy" },
-  pricing_mismatch: { label: "Pricing Mismatch" },
-  other: { label: "Other" },
 };
 
 function TopIssuesColumn({
@@ -80,14 +61,16 @@ function TopIssuesColumn({
           <TableBody>
             {displayedAnomalies.map((anomaly, index) => {
               const monthlyImpact = (anomaly.annual_impact ?? 0) / 12;
+              const config = categoryConfig[anomaly.category] || categoryConfig.other;
+              
               return (
                 <TableRow key={anomaly.id} className="border-[#E7E5E4]">
                   <TableCell className="px-2 text-sm text-[#0A0A0A]">
                     {startIndex + index + 1}
                   </TableCell>
                   <TableCell>
-                    <Badge className="bg-[#FA6400] border-transparent text-[#FAFAF9]">
-                      {categoryConfig[anomaly.category]?.label ?? "Other"}
+                    <Badge className={`${config.badgeClass} border-transparent`}>
+                      {config.label}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -150,12 +133,12 @@ function TopIssuesColumn({
 export function NeedsActionLayout({ anomalies }: NeedsActionLayoutProps) {
   const [selectedAnomaly, setSelectedAnomaly] = useState<Anomaly | null>(null);
 
-  // Sort by annual impact and take top 10
+  // Sort by annual impact DESC and take top 10
   const sortedAnomalies = [...anomalies]
     .sort((a, b) => (b.annual_impact ?? 0) - (a.annual_impact ?? 0))
     .slice(0, 10);
 
-  // Top 5 issues by impact
+  // Top 5 issues by annual impact (already sorted)
   const topIssues = sortedAnomalies.slice(0, 5);
 
   return (

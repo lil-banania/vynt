@@ -219,46 +219,48 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
             <ArrowLeft className="h-4 w-4" />
             All audits
           </Link>
-          <h1 className="text-3xl font-semibold text-slate-900">Audit Detail</h1>
+          <h1 className="font-['Literata'] text-4xl font-normal leading-10 tracking-[-1.5px] text-[#1C1917]">
+            Your audit
+          </h1>
         </div>
         <ExportAuditButton />
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-4">
-        <Card className="border-slate-200">
-          <CardContent className="pt-4">
-            <p className="text-sm text-slate-500">Total anomalies</p>
-            <p className="mt-1 text-3xl font-semibold text-slate-900">
+      <div className="grid grid-cols-4 gap-[10px]">
+        <Card className="border-[#E7E5E4] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]">
+          <CardContent className="flex flex-col gap-4 p-4">
+            <p className="text-base font-normal leading-6 text-[#78716C]">Total anomalies</p>
+            <p className="text-[30px] font-normal leading-9 text-[#1C1917]">
               {audit.total_anomalies ?? 0}
             </p>
           </CardContent>
         </Card>
-        <Card className="border-slate-200">
-          <CardContent className="pt-4">
-            <p className="text-sm text-slate-500">Estimated Recovery</p>
-            <p className="mt-1 text-3xl font-semibold text-emerald-600">
+        <Card className="border-[#E7E5E4] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]">
+          <CardContent className="flex flex-col justify-between p-4">
+            <p className="text-base font-normal leading-6 text-[#78716C]">Estimated Recovery</p>
+            <p className="text-[30px] font-normal leading-9 text-[#15803D]">
               {formatCurrency(estimatedRecovery)}
             </p>
           </CardContent>
         </Card>
-        <Card className="border-slate-200">
-          <CardContent className="pt-4">
-            <p className="text-sm text-slate-500">Annual Revenue at Risk</p>
-            <p className="mt-1 text-3xl font-semibold text-rose-600">
+        <Card className="border-[#E7E5E4] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]">
+          <CardContent className="flex flex-col justify-between p-4">
+            <p className="text-base font-normal leading-6 text-[#78716C]">Annual Revenue at Risk</p>
+            <p className="text-[30px] font-normal leading-9 text-[#991B1B]">
               {formatCurrency(totalRevenueAtRisk)}
             </p>
           </CardContent>
         </Card>
-        <Card className="border-slate-200">
-          <CardContent className="pt-4">
-            <p className="text-sm text-slate-500">Avg. Detection Time</p>
-            <p className="mt-1 text-3xl font-semibold text-slate-900">
-              4-7<span className="text-lg font-normal text-slate-500">months</span>
+        <Card className="border-[#E7E5E4] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]">
+          <CardContent className="flex flex-col justify-between p-4">
+            <p className="text-base font-normal leading-6 text-[#78716C]">Avg. Detection Time</p>
+            <p className="text-[30px] font-normal leading-9 text-[#1C1917]">
+              4-7<span className="text-base font-medium text-[#78716C]">months</span>
             </p>
           </CardContent>
         </Card>
-          </div>
+      </div>
 
       {/* Tabs */}
       <Tabs defaultValue="overview" className="space-y-6">
@@ -294,44 +296,44 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
                   Financial Impact Summary
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="flex items-stretch divide-x divide-slate-200">
+              <CardContent className="px-0">
+                <div className="flex items-center divide-x divide-[#E7E5E4]">
                   {/* Total Revenue at Risk */}
-                  <div className="flex-1 px-4 py-2 first:pl-0">
-                    <p className="text-sm text-slate-500">Total Revenue at Risk</p>
-                    <p className="mt-2 text-2xl font-semibold text-rose-600">
+                  <div className="flex-1 px-4 py-2">
+                    <p className="text-sm font-normal text-[#78716C]">Total Revenue at Risk</p>
+                    <p className="mt-2 text-2xl font-normal text-[#DC2626]">
                       {formatCurrency(totalRevenueAtRisk)}
                     </p>
-                    <p className="mt-1 text-xs text-slate-400">85%</p>
+                    <p className="mt-1 text-xs font-normal text-[#A8A29E]">85%</p>
                   </div>
                   
                   {/* Estimated Recoverable */}
                   <div className="flex-1 px-4 py-2">
-                    <p className="text-sm text-slate-500">Estimated Recoverable</p>
-                    <p className="mt-2 text-2xl font-semibold text-emerald-600">
+                    <p className="text-sm font-normal text-[#78716C]">Estimated Recoverable</p>
+                    <p className="mt-2 text-2xl font-normal text-[#15803D]">
                       {formatCurrency(estimatedRecovery)}
                     </p>
-                    <p className="mt-1 text-xs text-slate-400">85%</p>
+                    <p className="mt-1 text-xs font-normal text-[#A8A29E]">85%</p>
                   </div>
                   
                   {/* Vynt Annual Cost */}
-                  <div className="flex-1 px-4 py-2 last:pr-0">
-                    <p className="text-sm text-slate-500">Vynt Annual Cost</p>
-                    <p className="mt-2 text-2xl font-semibold text-slate-900">
+                  <div className="flex-1 px-4 py-2">
+                    <p className="text-sm font-normal text-[#78716C]">Vynt Annual Cost</p>
+                    <p className="mt-2 text-2xl font-normal text-[#1C1917]">
                       {formatCurrency(vyntAnnualCost)}
                     </p>
-                    <p className="mt-1 text-xs text-slate-400">85%</p>
+                    <p className="mt-1 text-xs font-normal text-[#A8A29E]">85%</p>
                   </div>
                 </div>
                 
-                <div className="h-px bg-slate-200 my-4" />
+                <div className="h-px bg-[#E7E5E4]" />
                 
-                <div className="flex items-stretch divide-x divide-slate-200">
+                <div className="flex items-center divide-x divide-[#E7E5E4]">
                   {/* Net Benefit Year 1 */}
-                  <div className="flex-1 px-4 py-2 first:pl-0">
-                    <p className="text-sm text-slate-500">Net Benefit Year 1</p>
+                  <div className="flex-1 px-4 py-2">
+                    <p className="text-sm font-normal text-[#78716C]">Net Benefit Year 1</p>
                     <p
-                      className={`mt-2 text-2xl font-semibold ${netBenefitYear1 >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+                      className={`mt-2 text-2xl font-normal ${netBenefitYear1 >= 0 ? "text-[#15803D]" : "text-[#DC2626]"}`}
                     >
                       {formatCurrency(netBenefitYear1)}
                     </p>
@@ -339,22 +341,22 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
                   
                   {/* ROI */}
                   <div className="flex-1 px-4 py-2">
-                    <p className="text-sm text-slate-500">ROI</p>
+                    <p className="text-sm font-normal text-[#78716C]">ROI</p>
                     <p
-                      className={`mt-2 text-2xl font-semibold ${roi >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+                      className={`mt-2 text-2xl font-normal ${roi >= 0 ? "text-[#15803D]" : "text-[#DC2626]"}`}
                     >
                       {roi.toFixed(1)}x
                     </p>
-                    <p className="mt-1 text-xs text-slate-400">months</p>
+                    <p className="mt-1 text-xs font-normal text-[#A8A29E]">months</p>
                   </div>
                   
                   {/* Payback Period */}
-                  <div className="flex-1 px-4 py-2 last:pr-0">
-                    <p className="text-sm text-slate-500">Payback Period</p>
-                    <p className="mt-2 text-2xl font-semibold text-slate-900">
+                  <div className="flex-1 px-4 py-2">
+                    <p className="text-sm font-normal text-[#78716C]">Payback Period</p>
+                    <p className="mt-2 text-2xl font-normal text-[#1C1917]">
                       {paybackMonths.toFixed(1)}
                     </p>
-                    <p className="mt-1 text-xs text-slate-400">months</p>
+                    <p className="mt-1 text-xs font-normal text-[#A8A29E]">months</p>
                   </div>
                 </div>
               </CardContent>

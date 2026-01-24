@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Info, TrendingUp, AlertTriangle } from "luci
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Anomaly } from "@/lib/types/database";
+import { categoryConfig, formatCurrency } from "@/lib/utils/category-config";
 
 type CommonPatternsColumnProps = {
   anomalies: Anomaly[];
@@ -18,25 +19,6 @@ type Pattern = {
   trend: "increasing" | "stable";
   insight: string;
   recommendation: string;
-};
-
-const categoryConfig: Record<string, { label: string }> = {
-  failed_payment: { label: "Failed Payment" },
-  duplicate_charge: { label: "Duplicate Charge" },
-  zombie_subscription: { label: "Zombie Subscription" },
-  unbilled_usage: { label: "Unbilled Usage" },
-  disputed_charge: { label: "Disputed Charge" },
-  fee_discrepancy: { label: "Fee Discrepancy" },
-  pricing_mismatch: { label: "Pricing Mismatch" },
-  other: { label: "Other" },
-};
-
-const formatCurrency = (value: number) => {
-  return value.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
 };
 
 // AI-powered pattern analysis
@@ -144,27 +126,30 @@ export function CommonPatternsColumn({ anomalies }: CommonPatternsColumnProps) {
 
       {/* Pattern Cards */}
       <div className="px-4 pb-4 space-y-3">
-        {displayedPatterns.map((pattern, index) => (
-          <div
-            key={pattern.category}
-            className="border border-[#E7E5E4] rounded-lg p-4 hover:bg-slate-50 transition-colors"
-          >
-            {/* Header Row */}
-            <div className="flex items-start justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-[#0A0A0A]">
-                  #{startIndex + index + 1}
-                </span>
-                <Badge className="bg-[#FA6400] border-transparent text-[#FAFAF9]">
-                  {categoryConfig[pattern.category]?.label ?? "Other"}
-                </Badge>
-                {pattern.trend === "increasing" && (
-                  <div className="flex items-center gap-1 text-xs text-rose-600">
-                    <TrendingUp className="h-3 w-3" />
-                    <span>Increasing</span>
-                  </div>
-                )}
-              </div>
+        {displayedPatterns.map((pattern, index) => {
+          const config = categoryConfig[pattern.category] || categoryConfig.other;
+          
+          return (
+            <div
+              key={pattern.category}
+              className="border border-[#E7E5E4] rounded-lg p-4 hover:bg-slate-50 transition-colors"
+            >
+              {/* Header Row */}
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-[#0A0A0A]">
+                    #{startIndex + index + 1}
+                  </span>
+                  <Badge className={`${config.badgeClass} border-transparent`}>
+                    {config.label}
+                  </Badge>
+                  {pattern.trend === "increasing" && (
+                    <div className="flex items-center gap-1 text-xs text-rose-600">
+                      <TrendingUp className="h-3 w-3" />
+                      <span>Increasing</span>
+                    </div>
+                  )}
+                </div>
               <div className="text-right">
                 <div className="text-sm font-semibold text-[#DC2626]">
                   {formatCurrency(pattern.totalImpact)}/yr
@@ -222,7 +207,8 @@ export function CommonPatternsColumn({ anomalies }: CommonPatternsColumnProps) {
               </div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Pagination */}

@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
 import { X } from "lucide-react";
 import { Anomaly } from "@/lib/types/database";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { categoryConfig, formatCurrency } from "@/lib/utils/category-config";
 
 type AnomalySidePanelProps = {
   anomaly: Anomaly | null;
@@ -12,52 +12,10 @@ type AnomalySidePanelProps = {
   onClose: () => void;
 };
 
-const formatCurrency = (value: number | null) => {
-  if (value === null) return "$0";
-  return value.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
-};
-
-const categoryConfig: Record<string, { label: string; color: string }> = {
-  failed_payment: {
-    label: "Failed Payment",
-    color: "bg-orange-100 text-orange-800 border-orange-200",
-  },
-  duplicate_charge: {
-    label: "Duplicate Charge",
-    color: "bg-blue-100 text-blue-800 border-blue-200",
-  },
-  zombie_subscription: {
-    label: "Zombie Subscription",
-    color: "bg-teal-100 text-teal-800 border-teal-200",
-  },
-  unbilled_usage: {
-    label: "Unbilled Usage",
-    color: "bg-yellow-100 text-yellow-800 border-yellow-200",
-  },
-  disputed_charge: {
-    label: "Disputed Charge",
-    color: "bg-green-100 text-green-800 border-green-200",
-  },
-  fee_discrepancy: {
-    label: "Fee Discrepancy",
-    color: "bg-purple-100 text-purple-800 border-purple-200",
-  },
-  pricing_mismatch: {
-    label: "Pricing Mismatch",
-    color: "bg-pink-100 text-pink-800 border-pink-200",
-  },
-  other: {
-    label: "Other",
-    color: "bg-slate-100 text-slate-800 border-[#E7E5E4]",
-  },
-};
-
 export function AnomalySidePanel({ anomaly, open, onClose }: AnomalySidePanelProps) {
   if (!open || !anomaly) return null;
+
+  const config = categoryConfig[anomaly.category] || categoryConfig.other;
 
   return (
     <>
@@ -67,11 +25,11 @@ export function AnomalySidePanel({ anomaly, open, onClose }: AnomalySidePanelPro
         onClick={onClose}
       />
       
-      {/* Side Panel */}
+      {/* Side Panel - 600px max width, no scroll needed */}
       <div className="fixed right-0 top-0 bottom-0 w-[600px] bg-white shadow-2xl z-50 overflow-y-auto">
         {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-[#E7E5E4] px-8 py-6 flex items-center justify-between">
-          <h2 className="text-2xl font-semibold text-[#1C1917]">Anomaly Details</h2>
+        <div className="sticky top-0 bg-white border-b border-[#E7E5E4] px-6 py-4 flex items-center justify-between">
+          <h2 className="text-xl font-medium text-[#1C1917]">Anomaly Details</h2>
           <Button
             variant="ghost"
             size="icon"
@@ -82,21 +40,18 @@ export function AnomalySidePanel({ anomaly, open, onClose }: AnomalySidePanelPro
           </Button>
         </div>
 
-        {/* Content */}
-        <div className="px-8 py-6 space-y-8">
+        {/* Content - Compact spacing */}
+        <div className="px-6 py-4 space-y-4">
           {/* Category Badge */}
           <div>
-            <Badge
-              variant="outline"
-              className={`border ${categoryConfig[anomaly.category]?.color ?? categoryConfig.other.color}`}
-            >
-              {categoryConfig[anomaly.category]?.label ?? categoryConfig.other.label}
+            <Badge className={`${config.badgeClass} border-transparent`}>
+              {config.label}
             </Badge>
           </div>
 
           {/* Confidence */}
           <div>
-            <p className="text-sm font-medium text-[#78716C] mb-2">Confidence Level</p>
+            <p className="text-sm font-medium text-[#78716C] mb-1">Confidence Level</p>
             <Badge
               variant={
                 anomaly.confidence === "high"
@@ -113,23 +68,23 @@ export function AnomalySidePanel({ anomaly, open, onClose }: AnomalySidePanelPro
 
           {/* Description */}
           <div>
-            <p className="text-sm font-medium text-[#78716C] mb-2">Description</p>
-            <p className="text-base text-[#1C1917]">
+            <p className="text-sm font-medium text-[#78716C] mb-1">Description</p>
+            <p className="text-sm text-[#1C1917] leading-relaxed">
               {anomaly.description ?? "No description available"}
             </p>
           </div>
 
           {/* Financial Impact */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="rounded-lg border border-[#E7E5E4] p-4">
-              <p className="text-sm text-[#78716C]">Annual Impact</p>
-              <p className="mt-2 text-3xl font-semibold text-[#DC2626]">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg border border-[#E7E5E4] p-3">
+              <p className="text-xs text-[#78716C]">Annual Impact</p>
+              <p className="mt-1 text-2xl font-semibold text-[#DC2626]">
                 {formatCurrency(anomaly.annual_impact)}
               </p>
             </div>
-            <div className="rounded-lg border border-[#E7E5E4] p-4">
-              <p className="text-sm text-[#78716C]">Monthly Impact</p>
-              <p className="mt-2 text-3xl font-semibold text-[#DC2626]">
+            <div className="rounded-lg border border-[#E7E5E4] p-3">
+              <p className="text-xs text-[#78716C]">Monthly Impact</p>
+              <p className="mt-1 text-2xl font-semibold text-[#DC2626]">
                 {formatCurrency(anomaly.monthly_impact)}
               </p>
             </div>
@@ -137,9 +92,9 @@ export function AnomalySidePanel({ anomaly, open, onClose }: AnomalySidePanelPro
 
           {/* Root Cause */}
           <div>
-            <p className="text-sm font-medium text-[#78716C] mb-2">Root Cause</p>
-            <div className="rounded-lg bg-slate-50 border border-[#E7E5E4] p-4">
-              <p className="text-base text-[#1C1917]">
+            <p className="text-sm font-medium text-[#78716C] mb-1">Root Cause</p>
+            <div className="rounded-lg bg-slate-50 border border-[#E7E5E4] p-3">
+              <p className="text-sm text-[#1C1917] leading-relaxed">
                 {anomaly.root_cause ?? "Analysis pending"}
               </p>
             </div>
@@ -147,9 +102,9 @@ export function AnomalySidePanel({ anomaly, open, onClose }: AnomalySidePanelPro
 
           {/* Recommendation */}
           <div>
-            <p className="text-sm font-medium text-[#78716C] mb-2">Recommendation</p>
-            <div className="rounded-lg bg-slate-50 border border-[#E7E5E4] p-4">
-              <p className="text-base text-[#1C1917]">
+            <p className="text-sm font-medium text-[#78716C] mb-1">Recommendation</p>
+            <div className="rounded-lg bg-slate-50 border border-[#E7E5E4] p-3">
+              <p className="text-sm text-[#1C1917] leading-relaxed">
                 {anomaly.recommendation ?? "Review required"}
               </p>
             </div>
@@ -158,8 +113,8 @@ export function AnomalySidePanel({ anomaly, open, onClose }: AnomalySidePanelPro
           {/* Customer Info */}
           {anomaly.customer_id && (
             <div>
-              <p className="text-sm font-medium text-[#78716C] mb-2">Customer ID</p>
-              <p className="text-base font-mono text-[#1C1917]">
+              <p className="text-sm font-medium text-[#78716C] mb-1">Customer ID</p>
+              <p className="text-sm font-mono text-[#1C1917]">
                 {anomaly.customer_id}
               </p>
             </div>
@@ -168,9 +123,9 @@ export function AnomalySidePanel({ anomaly, open, onClose }: AnomalySidePanelPro
           {/* Metadata */}
           {anomaly.metadata && Object.keys(anomaly.metadata).length > 0 && (
             <div>
-              <p className="text-sm font-medium text-[#78716C] mb-2">Additional Details</p>
-              <div className="rounded-lg bg-slate-50 border border-[#E7E5E4] p-4">
-                <pre className="text-sm text-[#1C1917] whitespace-pre-wrap font-mono">
+              <p className="text-sm font-medium text-[#78716C] mb-1">Additional Details</p>
+              <div className="rounded-lg bg-slate-50 border border-[#E7E5E4] p-3">
+                <pre className="text-xs text-[#1C1917] whitespace-pre-wrap font-mono">
                   {JSON.stringify(anomaly.metadata, null, 2)}
                 </pre>
               </div>
@@ -178,11 +133,11 @@ export function AnomalySidePanel({ anomaly, open, onClose }: AnomalySidePanelPro
           )}
 
           {/* Actions */}
-          <div className="flex gap-3 pt-4">
-            <Button className="flex-1" variant="default">
+          <div className="flex gap-3 pt-2">
+            <Button className="flex-1" variant="default" size="sm">
               Mark as Resolved
             </Button>
-            <Button className="flex-1" variant="outline">
+            <Button className="flex-1" variant="outline" size="sm">
               Dismiss
             </Button>
           </div>
