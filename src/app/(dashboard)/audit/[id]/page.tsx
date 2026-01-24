@@ -226,36 +226,36 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
         <ExportAuditButton />
       </div>
 
-      {/* KPI Cards */}
+      {/* KPI Cards - Compact Figma design */}
       <div className="grid grid-cols-4 gap-[10px]">
         <Card className="border-[#E7E5E4] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]">
-          <CardContent className="flex flex-col gap-4 p-4">
+          <CardContent className="p-4">
             <p className="text-base font-normal leading-6 text-[#78716C]">Total anomalies</p>
-            <p className="text-[30px] font-normal leading-9 text-[#1C1917]">
+            <p className="mt-2 text-[30px] font-normal leading-9 text-[#1C1917]">
               {audit.total_anomalies ?? 0}
             </p>
           </CardContent>
         </Card>
         <Card className="border-[#E7E5E4] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]">
-          <CardContent className="flex flex-col justify-between p-4">
+          <CardContent className="p-4">
             <p className="text-base font-normal leading-6 text-[#78716C]">Estimated Recovery</p>
-            <p className="text-[30px] font-normal leading-9 text-[#15803D]">
+            <p className="mt-2 text-[30px] font-normal leading-9 text-[#15803D]">
               {formatCurrency(estimatedRecovery)}
             </p>
           </CardContent>
         </Card>
         <Card className="border-[#E7E5E4] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]">
-          <CardContent className="flex flex-col justify-between p-4">
+          <CardContent className="p-4">
             <p className="text-base font-normal leading-6 text-[#78716C]">Annual Revenue at Risk</p>
-            <p className="text-[30px] font-normal leading-9 text-[#991B1B]">
+            <p className="mt-2 text-[30px] font-normal leading-9 text-[#991B1B]">
               {formatCurrency(totalRevenueAtRisk)}
             </p>
           </CardContent>
         </Card>
         <Card className="border-[#E7E5E4] shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]">
-          <CardContent className="flex flex-col justify-between p-4">
+          <CardContent className="p-4">
             <p className="text-base font-normal leading-6 text-[#78716C]">Avg. Detection Time</p>
-            <p className="text-[30px] font-normal leading-9 text-[#1C1917]">
+            <p className="mt-2 text-[30px] font-normal leading-9 text-[#1C1917]">
               4-7<span className="text-base font-medium text-[#78716C]">months</span>
             </p>
           </CardContent>
@@ -410,7 +410,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
 
         {/* All Anomalies Tab */}
         <TabsContent value="all-anomalies" className="space-y-4">
-          <AnomalyTable anomalies={anomalies} pageSize={10} />
+          <AnomalyTable anomalies={anomalies} />
         </TabsContent>
       </Tabs>
     </div>

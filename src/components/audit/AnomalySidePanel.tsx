@@ -75,19 +75,11 @@ export function AnomalySidePanel({ anomaly, open, onClose }: AnomalySidePanelPro
           </div>
 
           {/* Financial Impact */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-lg border border-[#E7E5E4] p-3">
-              <p className="text-xs text-[#78716C]">Annual Impact</p>
-              <p className="mt-1 text-2xl font-semibold text-[#DC2626]">
-                {formatCurrency(anomaly.annual_impact)}
-              </p>
-            </div>
-            <div className="rounded-lg border border-[#E7E5E4] p-3">
-              <p className="text-xs text-[#78716C]">Monthly Impact</p>
-              <p className="mt-1 text-2xl font-semibold text-[#DC2626]">
-                {formatCurrency(anomaly.monthly_impact)}
-              </p>
-            </div>
+          <div className="rounded-lg border border-[#E7E5E4] p-3">
+            <p className="text-xs text-[#78716C]">Annual Impact</p>
+            <p className="mt-1 text-2xl font-semibold text-[#DC2626]">
+              {formatCurrency(anomaly.annual_impact)}
+            </p>
           </div>
 
           {/* Root Cause */}
