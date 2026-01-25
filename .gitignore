@@ -24,6 +24,9 @@
 .DS_Store
 *.pem
 
+# generated test datasets (on-demand, do not commit)
+/test-data/generated/
+
 # debug
 npm-debug.log*
 yarn-debug.log*

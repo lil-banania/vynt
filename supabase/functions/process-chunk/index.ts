@@ -43,9 +43,23 @@ function mapRow(row: Record<string, string>, mapping: Record<string, string | nu
   return result;
 }
 
+// Parse amounts into **cents** (align with analyze-audit)
 function parseAmount(value: string | undefined): number {
   if (!value) return 0;
-  return Number(value.replace(/[^0-9.-]/g, "")) || 0;
+  const raw = String(value).trim();
+  if (!raw) return 0;
+
+  const hasDecimal = raw.includes(".");
+  const hasCurrencyOrComma = /[$,]/.test(raw);
+  const cleaned = raw.replace(/[^0-9.-]/g, "");
+  if (!cleaned) return 0;
+  const num = Number(cleaned);
+  if (!Number.isFinite(num)) return 0;
+
+  if (hasDecimal || hasCurrencyOrComma) return Math.round(num * 100);
+  const abs = Math.abs(num);
+  if (abs < 1000) return Math.round(num * 100);
+  return Math.round(num);
 }
 
 function parseDate(value: string | undefined): Date | null {

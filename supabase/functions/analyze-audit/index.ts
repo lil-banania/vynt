@@ -89,20 +89,54 @@ function mapRow(row: Record<string, string>, mapping: Record<string, string | nu
   return result;
 }
 
+// Parse amounts into **cents** with heuristics to support:
+// - cents integers: 29900
+// - dollars integers: 299
+// - currency strings: "$299.00"
 function parseAmount(value: string | undefined): number {
   if (!value) return 0;
-  const cleaned = value.replace(/[^0-9.-]/g, "");
-  return Number(cleaned) || 0;
+  const raw = String(value).trim();
+  if (!raw) return 0;
+
+  const hasDecimal = raw.includes(".");
+  const hasCurrencyOrComma = /[$,]/.test(raw);
+
+  const cleaned = raw.replace(/[^0-9.-]/g, "");
+  if (!cleaned) return 0;
+
+  const num = Number(cleaned);
+  if (!Number.isFinite(num)) return 0;
+
+  // If it looks like dollars (decimal or formatted currency), convert to cents.
+  if (hasDecimal || hasCurrencyOrComma) {
+    return Math.round(num * 100);
+  }
+
+  // Integer heuristic:
+  // - < 1000 => treat as dollars (299 -> 29900)
+  // - >= 1000 => treat as cents (29900 -> 29900)
+  const abs = Math.abs(num);
+  if (abs < 1000) return Math.round(num * 100);
+  return Math.round(num);
 }
 
 function parseDate(value: string | undefined): Date | null {
   if (!value) return null;
-  const num = Number(value);
-  if (!isNaN(num) && num > 1000000000) {
-    return new Date(num * 1000);
-  }
-  const date = new Date(value);
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const num = Number(raw);
+  // Unix seconds vs milliseconds
+  if (!isNaN(num) && num > 1e9 && num < 1e10) return new Date(num * 1000);
+  if (!isNaN(num) && num > 1e12) return new Date(num);
+
+  const date = new Date(raw);
   return isNaN(date.getTime()) ? null : date;
+}
+
+function dateDiffDays(d1: Date | null, d2: Date | null): number {
+  if (!d1 || !d2) return Infinity;
+  return Math.abs(d1.getTime() - d2.getTime()) / (1000 * 60 * 60 * 24);
 }
 
 const DEFAULT_CURRENCY = "EUR";
@@ -137,7 +171,8 @@ const DEFAULT_CONFIG: ReconciliationConfig = {
   payoutGraceDays: 4,
   unreconciledRiskPct: 0.05,
   feeDiscrepancyThresholdCents: 100,
-  timingMismatchDays: 1,
+  // Allow more skew between DB timestamps and Stripe export timestamps for better matching
+  timingMismatchDays: 3,
   payoutGroupMinTransactions: 3,
   grossDiffThresholdCents: 100,
   annualizationMonths: 12,
