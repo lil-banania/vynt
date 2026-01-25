@@ -299,7 +299,7 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
                             <div className="flex items-center gap-3">
                               <div
                                 className="rounded-lg p-2"
-                                style={{ backgroundColor: style.bgColor }}
+                                style={{ backgroundColor: style.chartColor }}
                               >
                                 <Icon className="h-4 w-4 text-white" />
                               </div>
@@ -355,7 +355,7 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
                           <div className="flex items-center gap-2">
                             <div
                               className="rounded-lg p-1.5"
-                              style={{ backgroundColor: catStyle.bgColor }}
+                              style={{ backgroundColor: catStyle.chartColor }}
                             >
                               <Icon className="h-4 w-4 text-white" />
                             </div>

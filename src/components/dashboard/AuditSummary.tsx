@@ -145,7 +145,7 @@ const AuditSummary = ({ audit, categoryBreakdown }: AuditSummaryProps) => {
                         <div className="flex items-center gap-3">
                           <div
                             className="rounded-lg p-2"
-                            style={{ backgroundColor: style.bgColor }}
+                            style={{ backgroundColor: style.chartColor }}
                           >
                             <Icon className="h-4 w-4 text-white" />
                           </div>

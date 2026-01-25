@@ -24,6 +24,7 @@ import { IndustryBenchmarking } from "./IndustryBenchmarking";
 import { ExportAuditButton } from "@/components/audit/ExportAuditButton";
 import { NeedsActionLayout } from "@/components/audit/NeedsActionLayout";
 import { AnomalyTable } from "@/components/audit/AnomalyTable";
+import { categoryConfig as categoryStyleConfig } from "@/lib/utils/category-config";
 
 type AuditDetailPageProps = {
   params: Promise<{
@@ -43,52 +44,6 @@ const formatCurrency = (value: number | null) => {
     currency: "USD",
     maximumFractionDigits: 0,
   });
-};
-
-const categoryConfig: Record<
-  string,
-  { label: string; color: string; chartColor: string }
-> = {
-  failed_payment: {
-    label: "Failed",
-    color: "bg-orange-100 text-orange-700",
-    chartColor: "#fb923c",
-  },
-  duplicate_charge: {
-    label: "Duplicate",
-    color: "bg-blue-100 text-blue-700",
-    chartColor: "#60a5fa",
-  },
-  zombie_subscription: {
-    label: "Zombie",
-    color: "bg-teal-100 text-teal-700",
-    chartColor: "#2dd4bf",
-  },
-  unbilled_usage: {
-    label: "Unbilled",
-    color: "bg-yellow-100 text-yellow-700",
-    chartColor: "#fbbf24",
-  },
-  disputed_charge: {
-    label: "Disputed",
-    color: "bg-green-100 text-green-700",
-    chartColor: "#4ade80",
-  },
-  fee_discrepancy: {
-    label: "Fee",
-    color: "bg-purple-100 text-purple-700",
-    chartColor: "#a78bfa",
-  },
-  pricing_mismatch: {
-    label: "Pricing",
-    color: "bg-pink-100 text-pink-700",
-    chartColor: "#f472b6",
-  },
-  other: {
-    label: "Other",
-    color: "bg-slate-100 text-slate-700",
-    chartColor: "#94a3b8",
-  },
 };
 
 const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
@@ -181,10 +136,11 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
   const chartData = Object.entries(categoryBreakdown)
     .map(([category, value]) => ({
       label:
-        categoryConfig[category]?.label ?? categoryConfig.other.label,
+        categoryStyleConfig[category]?.label ?? categoryStyleConfig.other.label,
       value,
       color:
-        categoryConfig[category]?.chartColor ?? categoryConfig.other.chartColor,
+        categoryStyleConfig[category]?.chartColor ??
+        categoryStyleConfig.other.chartColor,
     }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 6);
@@ -260,7 +216,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
             </p>
           </CardContent>
         </Card>
-      </div>
+          </div>
 
       {/* Tabs */}
       <Tabs defaultValue="overview" className="space-y-6">
@@ -314,8 +270,8 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
                       {formatCurrency(estimatedRecovery)}
                     </p>
                     <p className="mt-1 text-xs font-normal text-[#A8A29E]">85%</p>
-                  </div>
-                  
+                    </div>
+                    
                   {/* Vynt Annual Cost */}
                   <div className="flex-1 px-4 py-2">
                     <p className="text-sm font-normal text-[#78716C]">Vynt Annual Cost</p>
@@ -337,8 +293,8 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
                     >
                       {formatCurrency(netBenefitYear1)}
                     </p>
-                  </div>
-                  
+          </div>
+          
                   {/* ROI */}
                   <div className="flex-1 px-4 py-2">
                     <p className="text-sm font-normal text-[#78716C]">ROI</p>
@@ -348,7 +304,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
                       {roi.toFixed(1)}x
                     </p>
                     <p className="mt-1 text-xs font-normal text-[#A8A29E]">months</p>
-                  </div>
+          </div>
                   
                   {/* Payback Period */}
                   <div className="flex-1 px-4 py-2">
@@ -358,7 +314,7 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
                     </p>
                     <p className="mt-1 text-xs font-normal text-[#A8A29E]">months</p>
                   </div>
-                </div>
+          </div>
               </CardContent>
             </Card>
 
@@ -381,8 +337,10 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col items-center justify-center py-8">
-                <p className="text-sm text-slate-500">Current Monthly Loss:</p>
-                <p className="mt-2 text-4xl font-bold text-rose-600">
+                <p className="text-xs font-medium leading-none text-[#78716C]">
+                  Current Monthly Loss:
+                </p>
+                <p className="mt-2 text-[36px] font-normal leading-none text-[#991B1B]">
                   {formatCurrency(monthlyLoss)}
                 </p>
                 <p className="mt-1 text-sm text-slate-400">/ month</p>

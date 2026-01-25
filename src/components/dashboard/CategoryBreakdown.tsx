@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { categoryConfig } from "@/lib/utils/category-config";
 
 type CategoryBreakdownProps = {
   anomalyCounts: {
@@ -13,22 +14,18 @@ const categories = [
   {
     key: "zombie_subscription",
     label: "Zombie Subscriptions",
-    color: "bg-red-500",
   },
   {
     key: "unbilled_usage",
     label: "Unbilled Usage",
-    color: "bg-orange-500",
   },
   {
     key: "pricing_mismatch",
     label: "Pricing Mismatch",
-    color: "bg-yellow-400",
   },
   {
     key: "duplicate_charge",
     label: "Duplicate Charge",
-    color: "bg-blue-500",
   },
 ] as const;
 
@@ -60,8 +57,13 @@ const CategoryBreakdown = ({ anomalyCounts }: CategoryBreakdownProps) => {
               </div>
               <div className="h-2 rounded-full bg-slate-100">
                 <div
-                  className={`h-2 rounded-full ${category.color}`}
-                  style={{ width: `${percent}%` }}
+                  className="h-2 rounded-full"
+                  style={{
+                    backgroundColor:
+                      categoryConfig[category.key]?.chartColor ??
+                      categoryConfig.other.chartColor,
+                    width: `${percent}%`,
+                  }}
                 />
               </div>
             </div>
