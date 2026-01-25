@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { ElementType } from "react";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -15,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Anomaly, Audit, AnomalyCategory, AnomalyConfidence } from "@/lib/types/database";
 import PublishButton from "@/components/admin/PublishButton";
+import { categoryConfig as categoryStyleConfig } from "@/lib/utils/category-config";
 
 type PreviewPageProps = {
   params: Promise<{
@@ -51,20 +53,17 @@ const formatDateRange = (start: string | null, end: string | null) => {
   return `${format(start)} - ${format(end)}`;
 };
 
-const categoryConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
-  zombie_subscription: { label: "Zombie Subscription", color: "bg-rose-500", icon: Users },
-  unbilled_usage: { label: "Unbilled Usage", color: "bg-amber-500", icon: FileText },
-  pricing_mismatch: { label: "Pricing Mismatch", color: "bg-purple-500", icon: DollarSign },
-  duplicate_charge: { label: "Duplicate Charge", color: "bg-orange-500", icon: AlertTriangle },
-  failed_payment: { label: "Failed Payment", color: "bg-red-500", icon: AlertTriangle },
-  high_refund_rate: { label: "High Refund Rate", color: "bg-yellow-500", icon: AlertTriangle },
-  missing_in_stripe: { label: "Missing in Stripe", color: "bg-blue-500", icon: AlertTriangle },
-  missing_in_db: { label: "Missing in DB", color: "bg-cyan-500", icon: AlertTriangle },
-  amount_mismatch: { label: "Amount Mismatch", color: "bg-indigo-500", icon: Target },
-  revenue_leakage: { label: "Revenue Leakage", color: "bg-pink-500", icon: TrendingDown },
-  disputed_charge: { label: "Disputed Charge", color: "bg-fuchsia-500", icon: AlertTriangle },
-  fee_discrepancy: { label: "Fee Discrepancy", color: "bg-lime-500", icon: AlertTriangle },
-  other: { label: "Other", color: "bg-slate-500", icon: AlertTriangle },
+const categoryIconConfig: Record<string, ElementType> = {
+  zombie_subscription: Users,
+  unbilled_usage: FileText,
+  pricing_mismatch: DollarSign,
+  duplicate_charge: AlertTriangle,
+  failed_payment: AlertTriangle,
+  amount_mismatch: Target,
+  revenue_leakage: TrendingDown,
+  disputed_charge: AlertTriangle,
+  fee_discrepancy: AlertTriangle,
+  other: AlertTriangle,
 };
 
 const confidenceConfig: Record<AnomalyConfidence, { label: string; color: string }> = {
@@ -292,16 +291,19 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
                   {Object.entries(categoryBreakdown)
                     .sort((a, b) => b[1].impact - a[1].impact)
                     .map(([category, data]) => {
-                      const config = categoryConfig[category] ?? categoryConfig.other;
-                      const Icon = config.icon;
+                      const style = categoryStyleConfig[category] ?? categoryStyleConfig.other;
+                      const Icon = categoryIconConfig[category] ?? categoryIconConfig.other;
                       return (
                         <tr key={category} className="hover:bg-slate-50 transition-colors">
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
-                              <div className={`rounded-lg p-2 ${config.color}`}>
+                              <div
+                                className="rounded-lg p-2"
+                                style={{ backgroundColor: style.bgColor }}
+                              >
                                 <Icon className="h-4 w-4 text-white" />
                               </div>
-                              <span className="font-medium text-slate-900">{config.label}</span>
+                              <span className="font-medium text-slate-900">{style.label}</span>
                             </div>
                           </td>
                           <td className="px-6 py-4 text-center">
@@ -334,9 +336,10 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
               
               <div className="space-y-4">
                 {topIssues.map((anomaly, index) => {
-                  const catConfig = categoryConfig[anomaly.category] ?? categoryConfig.other;
+                  const catStyle =
+                    categoryStyleConfig[anomaly.category] ?? categoryStyleConfig.other;
                   const confConfig = confidenceConfig[anomaly.confidence];
-                  const Icon = catConfig.icon;
+                  const Icon = categoryIconConfig[anomaly.category] ?? categoryIconConfig.other;
                   const confidenceReason = getMetaString(anomaly.metadata, "confidence_reason");
                   const impactType = getMetaString(anomaly.metadata, "impact_type");
                   const detectionMethod = getMetaString(anomaly.metadata, "detection_method");
@@ -350,10 +353,13 @@ const PreviewPage = async ({ params }: PreviewPageProps) => {
                             {index + 1}
                           </span>
                           <div className="flex items-center gap-2">
-                            <div className={`rounded-lg p-1.5 ${catConfig.color}`}>
+                            <div
+                              className="rounded-lg p-1.5"
+                              style={{ backgroundColor: catStyle.bgColor }}
+                            >
                               <Icon className="h-4 w-4 text-white" />
                             </div>
-                            <span className="font-semibold text-slate-900">{catConfig.label}</span>
+                            <span className="font-semibold text-slate-900">{catStyle.label}</span>
                           </div>
                           {anomaly.customer_id && (
                             <span className="text-sm text-slate-500">— Customer #{anomaly.customer_id}</span>

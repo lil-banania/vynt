@@ -44,7 +44,7 @@ export function AnomalySidePanel({ anomaly, open, onClose }: AnomalySidePanelPro
         <div className="px-6 py-4 space-y-4">
           {/* Category Badge */}
           <div>
-            <Badge className={`${config.badgeClass} border-transparent`}>
+            <Badge variant="outline" className={config.badgeClass}>
               {config.label}
             </Badge>
           </div>

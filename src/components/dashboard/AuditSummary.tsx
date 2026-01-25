@@ -1,6 +1,8 @@
+import type { ElementType } from "react";
 import { AlertTriangle, Clock, DollarSign, TrendingUp, Users, FileText } from "lucide-react";
 
 import { Audit } from "@/lib/types/database";
+import { categoryConfig as categoryStyleConfig } from "@/lib/utils/category-config";
 
 type CategoryData = {
   count: number;
@@ -33,20 +35,15 @@ const formatDateRange = (start: string | null, end: string | null) => {
   return `${format(start)} - ${format(end)}`;
 };
 
-const categoryConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
-  zombie_subscription: { label: "Zombie Subscription", color: "bg-rose-500", icon: Users },
-  unbilled_usage: { label: "Unbilled Usage", color: "bg-amber-500", icon: FileText },
-  pricing_mismatch: { label: "Pricing Mismatch", color: "bg-purple-500", icon: DollarSign },
-  duplicate_charge: { label: "Duplicate Charge", color: "bg-orange-500", icon: AlertTriangle },
-  failed_payment: { label: "Failed Payment", color: "bg-red-500", icon: AlertTriangle },
-  high_refund_rate: { label: "High Refund Rate", color: "bg-yellow-500", icon: AlertTriangle },
-  missing_in_stripe: { label: "Missing in Stripe", color: "bg-blue-500", icon: AlertTriangle },
-  missing_in_db: { label: "Missing in DB", color: "bg-cyan-500", icon: AlertTriangle },
-  amount_mismatch: { label: "Amount Mismatch", color: "bg-indigo-500", icon: AlertTriangle },
-  revenue_leakage: { label: "Revenue Leakage", color: "bg-pink-500", icon: AlertTriangle },
-  disputed_charge: { label: "Disputed Charge", color: "bg-fuchsia-500", icon: AlertTriangle },
-  fee_discrepancy: { label: "Fee Discrepancy", color: "bg-lime-500", icon: AlertTriangle },
-  other: { label: "Other", color: "bg-slate-500", icon: AlertTriangle },
+const categoryIconConfig: Record<string, ElementType> = {
+  zombie_subscription: Users,
+  unbilled_usage: FileText,
+  pricing_mismatch: DollarSign,
+  duplicate_charge: AlertTriangle,
+  failed_payment: AlertTriangle,
+  disputed_charge: AlertTriangle,
+  fee_discrepancy: AlertTriangle,
+  other: AlertTriangle,
 };
 
 const AuditSummary = ({ audit, categoryBreakdown }: AuditSummaryProps) => {
@@ -140,16 +137,19 @@ const AuditSummary = ({ audit, categoryBreakdown }: AuditSummaryProps) => {
                 .filter(([, data]) => data.count > 0)
                 .sort((a, b) => b[1].impact - a[1].impact)
                 .map(([category, data]) => {
-                  const config = categoryConfig[category] ?? categoryConfig.other;
-                  const Icon = config.icon;
+                  const style = categoryStyleConfig[category] ?? categoryStyleConfig.other;
+                  const Icon = categoryIconConfig[category] ?? categoryIconConfig.other;
                   return (
                     <tr key={category} className="hover:bg-slate-50 transition-colors">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <div className={`rounded-lg p-2 ${config.color}`}>
+                          <div
+                            className="rounded-lg p-2"
+                            style={{ backgroundColor: style.bgColor }}
+                          >
                             <Icon className="h-4 w-4 text-white" />
                           </div>
-                          <span className="font-medium text-slate-900">{config.label}</span>
+                          <span className="font-medium text-slate-900">{style.label}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-center">

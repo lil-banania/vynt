@@ -1,47 +1,55 @@
-// Category configuration with Figma-compliant colors matching dashboard breakdown
+// Category configuration with Figma-compliant colors matching the "All anomalies" screen
 export const categoryConfig: Record<
   string,
   { label: string; badgeClass: string; bgColor: string }
 > = {
   failed_payment: {
-    label: "Failed payment",
-    badgeClass: "bg-[#EF4444] text-[#FAFAF9]", // Red - Figma breakdown
-    bgColor: "#EF4444",
+    label: "Failed Payment",
+    // Figma: outline pill
+    badgeClass: "bg-[#FFFFFF] text-[#0A0A0A] border border-[#E7E5E4]",
+    bgColor: "#0A0A0A",
   },
   duplicate_charge: {
     label: "Duplicate Charge",
-    badgeClass: "bg-[#3B82F6] text-[#FAFAF9]", // Blue - Figma breakdown
-    bgColor: "#3B82F6",
+    // Figma: purple pill
+    badgeClass: "bg-[#F3E8FF] text-[#7E22CE] border border-[#E9D5FF]",
+    bgColor: "#7E22CE",
   },
   zombie_subscription: {
     label: "Zombie Subscription",
-    badgeClass: "bg-[#F43F5E] text-[#FAFAF9]", // Rose - Figma breakdown
-    bgColor: "#F43F5E",
+    // Figma: warning pill
+    badgeClass: "bg-[#FEF3C7] text-[#A16207] border border-[#FDE68A]",
+    bgColor: "#A16207",
   },
   unbilled_usage: {
     label: "Unbilled Usage",
-    badgeClass: "bg-[#F59E0B] text-[#FAFAF9]", // Amber - Figma breakdown
-    bgColor: "#F59E0B",
+    // Figma: destructive pill
+    badgeClass: "bg-[#DC26261A] text-[#991B1B] border border-[#DC262633]",
+    bgColor: "#991B1B",
   },
   disputed_charge: {
     label: "Disputed Charge",
-    badgeClass: "bg-[#D946EF] text-[#FAFAF9]", // Fuchsia - Figma breakdown
-    bgColor: "#D946EF",
+    // Not shown on the All anomalies frame we sampled; use destructive tonality
+    badgeClass: "bg-[#DC26261A] text-[#991B1B] border border-[#DC262633]",
+    bgColor: "#991B1B",
   },
   fee_discrepancy: {
     label: "Fee Discrepancy",
-    badgeClass: "bg-[#84CC16] text-[#FAFAF9]", // Lime - Figma breakdown
-    bgColor: "#84CC16",
+    // Not shown on the All anomalies frame we sampled; use warning tonality
+    badgeClass: "bg-[#FEF3C7] text-[#A16207] border border-[#FDE68A]",
+    bgColor: "#A16207",
   },
   pricing_mismatch: {
     label: "Pricing Mismatch",
-    badgeClass: "bg-[#A855F7] text-[#FAFAF9]", // Purple - Figma breakdown
-    bgColor: "#A855F7",
+    // Not shown on the All anomalies frame we sampled; use success tonality
+    badgeClass: "bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0]",
+    bgColor: "#15803D",
   },
   other: {
     label: "Other",
-    badgeClass: "bg-[#64748B] text-[#FAFAF9]", // Slate - Figma breakdown
-    bgColor: "#64748B",
+    // Neutral outline
+    badgeClass: "bg-[#FFFFFF] text-[#0A0A0A] border border-[#E7E5E4]",
+    bgColor: "#0A0A0A",
   },
 };
 

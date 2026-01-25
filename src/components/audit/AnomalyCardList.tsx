@@ -5,57 +5,13 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Anomaly } from "@/lib/types/database";
 import { AnomalySidePanel } from "./AnomalySidePanel";
+import { categoryConfig, formatCurrency } from "@/lib/utils/category-config";
 
 type AnomalyCardListProps = {
   anomalies: Anomaly[];
 };
 
-const formatCurrency = (value: number | null) => {
-  if (value === null) return "$0";
-  return value.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
-};
-
-const categoryConfig: Record<
-  string,
-  { label: string; color: string }
-> = {
-  failed_payment: {
-    label: "Failed Payment",
-    color: "bg-red-50 text-red-800 border-red-200",
-  },
-  duplicate_charge: {
-    label: "Duplicate Charge",
-    color: "bg-blue-50 text-blue-800 border-blue-200",
-  },
-  zombie_subscription: {
-    label: "Zombie Subscription",
-    color: "bg-teal-50 text-teal-800 border-teal-200",
-  },
-  unbilled_usage: {
-    label: "Unbilled Usage",
-    color: "bg-yellow-50 text-yellow-800 border-yellow-200",
-  },
-  disputed_charge: {
-    label: "Disputed Charge",
-    color: "bg-green-50 text-green-800 border-green-200",
-  },
-  fee_discrepancy: {
-    label: "Fee Discrepancy",
-    color: "bg-purple-50 text-purple-800 border-purple-200",
-  },
-  pricing_mismatch: {
-    label: "Pricing Mismatch",
-    color: "bg-pink-50 text-pink-800 border-pink-200",
-  },
-  other: {
-    label: "Other",
-    color: "bg-slate-50 text-slate-800 border-slate-200",
-  },
-};
+// formatCurrency + categoryConfig come from the centralized config
 
 export function AnomalyCardList({ anomalies }: AnomalyCardListProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -111,9 +67,11 @@ export function AnomalyCardList({ anomalies }: AnomalyCardListProps) {
                     
                     <Badge
                       variant="outline"
-                      className={`border ${categoryConfig[anomaly.category]?.color ?? categoryConfig.other.color}`}
+                      className={
+                        (categoryConfig[anomaly.category] ?? categoryConfig.other).badgeClass
+                      }
                     >
-                      {categoryConfig[anomaly.category]?.label ?? categoryConfig.other.label}
+                      {(categoryConfig[anomaly.category] ?? categoryConfig.other).label}
                     </Badge>
 
                     <p className="text-sm text-[#78716C] flex-1">

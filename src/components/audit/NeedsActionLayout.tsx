@@ -69,7 +69,7 @@ function TopIssuesColumn({
                     {startIndex + index + 1}
                   </TableCell>
                   <TableCell>
-                    <Badge className={`${config.badgeClass} border-transparent`}>
+                    <Badge variant="outline" className={config.badgeClass}>
                       {config.label}
                     </Badge>
                   </TableCell>

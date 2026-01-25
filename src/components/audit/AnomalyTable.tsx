@@ -27,16 +27,23 @@ type AnomalyTableProps = {
   anomalies: Anomaly[];
 };
 
-const statusConfig: Record<string, { label: string; textColor: string }> = {
-  detected: { label: "Detected", textColor: "text-[#EF4444]" },
-  in_progress: { label: "In Progress", textColor: "text-[#F59E0B]" },
-  recovered: { label: "Recovered", textColor: "text-[#15803D]" },
+const statusLabelMap: Record<string, string> = {
+  detected: "Detected",
+  in_progress: "In progress",
+  recovered: "Recovered",
 };
 
-const confidenceConfig: Record<string, { label: string; bgColor: string; textColor: string }> = {
-  high: { label: "High", bgColor: "bg-[#DCFCE7]", textColor: "text-[#166534]" }, // Green-100 bg, green-800 text
-  medium: { label: "Medium", bgColor: "bg-[#FEF3C7]", textColor: "text-[#92400E]" }, // Amber-100 bg, amber-800 text
-  low: { label: "Low", bgColor: "bg-[#F1F5F9]", textColor: "text-[#475569]" }, // Slate-100 bg, slate-600 text
+// Exact from Figma "All anomalies" frame:
+// - High: bg #DCFCE7, border #BBF7D0, text #15803D
+// - Low: bg #FFFFFF, border #E7E5E4, text #0A0A0A
+// - Medium isn't visible in the sampled frame; we match the Figma warning token.
+const confidenceConfig: Record<
+  string,
+  { label: string; bgHex: string; borderHex: string; textHex: string }
+> = {
+  high: { label: "High", bgHex: "#DCFCE7", borderHex: "#BBF7D0", textHex: "#15803D" },
+  medium: { label: "Medium", bgHex: "#FEF3C7", borderHex: "#FDE68A", textHex: "#A16207" },
+  low: { label: "Low", bgHex: "#FFFFFF", borderHex: "#E7E5E4", textHex: "#0A0A0A" },
 };
 
 export function AnomalyTable({ anomalies }: AnomalyTableProps) {
@@ -171,12 +178,23 @@ export function AnomalyTable({ anomalies }: AnomalyTableProps) {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent border-[#E7E5E4]">
-                <TableHead className="text-sm font-normal text-[#0A0A0A] w-[180px]">Category</TableHead>
-                <TableHead className="text-sm font-normal text-[#0A0A0A] w-[200px]">Customer ID</TableHead>
-                <TableHead className="text-sm font-normal text-[#0A0A0A] w-[140px]">Status</TableHead>
-                <TableHead className="text-sm font-normal text-[#0A0A0A] w-[140px]">Confidence</TableHead>
-                <TableHead className="text-right text-sm font-normal text-[#0A0A0A] w-[160px]">Annual Impact</TableHead>
-                <TableHead className="w-[100px]"></TableHead>
+                {/* Match Figma column proportions */}
+                <TableHead className="text-sm font-normal text-[#0A0A0A] w-[281px]">
+                  Anomaly type
+                </TableHead>
+                <TableHead className="text-sm font-normal text-[#0A0A0A] w-[281px]">
+                  Customer ID
+                </TableHead>
+                <TableHead className="text-sm font-normal text-[#0A0A0A] w-[197px]">
+                  Confidence
+                </TableHead>
+                <TableHead className="text-sm font-normal text-[#0A0A0A] w-[112px]">
+                  Status
+                </TableHead>
+                <TableHead className="text-sm font-normal text-[#0A0A0A] w-[140px] text-right">
+                  Annual impact
+                </TableHead>
+                <TableHead className="w-[140px]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -189,33 +207,45 @@ export function AnomalyTable({ anomalies }: AnomalyTableProps) {
               ) : (
                 currentAnomalies.map((anomaly) => {
                   const config = categoryConfig[anomaly.category] || categoryConfig.other;
-                  const status = statusConfig[anomaly.status || "detected"] || statusConfig.detected;
-                  const confidence = confidenceConfig[anomaly.confidence] || confidenceConfig.low;
+                  const statusLabel =
+                    statusLabelMap[anomaly.status || "detected"] || anomaly.status || "Detected";
+                  const confidence =
+                    confidenceConfig[anomaly.confidence] || confidenceConfig.low;
 
                   return (
                     <TableRow key={anomaly.id} className="border-[#E7E5E4]">
-                      <TableCell className="w-[180px]">
-                        <Badge className={`${config.badgeClass} border-transparent`}>
+                      <TableCell className="w-[281px]">
+                        <Badge
+                          variant="outline"
+                          className={`${config.badgeClass} text-xs font-medium leading-4 px-2 py-0.5 rounded-md`}
+                        >
                           {config.label}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-mono text-sm text-[#78716C] w-[200px]">
+                      <TableCell className="font-mono text-sm text-[#78716C] w-[281px]">
                         {anomaly.customer_id?.slice(0, 16) ?? "—"}
                       </TableCell>
-                      <TableCell className="w-[140px]">
-                        <span className={`text-sm font-normal ${status.textColor}`}>
-                          {status.label}
-                        </span>
-                      </TableCell>
-                      <TableCell className="w-[140px]">
-                        <span className={`inline-block px-2 py-1 rounded text-xs font-normal ${confidence.bgColor} ${confidence.textColor}`}>
+                      <TableCell className="w-[197px]">
+                        <span
+                          className="inline-flex items-center justify-center rounded-md border px-2 py-0.5 text-xs font-medium leading-4"
+                          style={{
+                            backgroundColor: confidence.bgHex,
+                            borderColor: confidence.borderHex,
+                            color: confidence.textHex,
+                          }}
+                        >
                           {confidence.label}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right font-normal text-[#0A0A0A] w-[160px]">
+                      <TableCell className="w-[112px]">
+                        <span className="text-sm font-normal text-[#0A0A0A]">
+                          {statusLabel}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-normal text-[#0A0A0A] w-[140px]">
                         {formatCurrency(anomaly.annual_impact)}
                       </TableCell>
-                      <TableCell className="w-[100px]">
+                      <TableCell className="w-[140px]">
                         <button
                           onClick={() => setSelectedAnomaly(anomaly)}
                           className="text-xs font-normal text-[#0A0A0A] underline hover:text-[#78716C] transition-colors"

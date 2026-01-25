@@ -140,7 +140,7 @@ export function CommonPatternsColumn({ anomalies }: CommonPatternsColumnProps) {
                   <span className="text-sm font-medium text-[#0A0A0A]">
                     #{startIndex + index + 1}
                   </span>
-                  <Badge className={`${config.badgeClass} border-transparent`}>
+            <Badge variant="outline" className={config.badgeClass}>
                     {config.label}
                   </Badge>
                   {pattern.trend === "increasing" && (

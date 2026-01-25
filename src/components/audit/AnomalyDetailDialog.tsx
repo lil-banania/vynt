@@ -9,6 +9,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Anomaly } from "@/lib/types/database";
 import { Separator } from "@/components/ui/separator";
+import { categoryConfig, formatCurrency } from "@/lib/utils/category-config";
 
 type AnomalyDetailDialogProps = {
   anomaly: Anomaly | null;
@@ -16,52 +17,7 @@ type AnomalyDetailDialogProps = {
   onOpenChange: (open: boolean) => void;
 };
 
-const formatCurrency = (value: number | null) => {
-  if (value === null) return "$0";
-  return value.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
-};
-
-const categoryConfig: Record<
-  string,
-  { label: string; color: string }
-> = {
-  failed_payment: {
-    label: "Failed Payment",
-    color: "bg-orange-100 text-orange-700",
-  },
-  duplicate_charge: {
-    label: "Duplicate Charge",
-    color: "bg-blue-100 text-blue-700",
-  },
-  zombie_subscription: {
-    label: "Zombie Subscription",
-    color: "bg-teal-100 text-teal-700",
-  },
-  unbilled_usage: {
-    label: "Unbilled Usage",
-    color: "bg-yellow-100 text-yellow-700",
-  },
-  disputed_charge: {
-    label: "Disputed Charge",
-    color: "bg-green-100 text-green-700",
-  },
-  fee_discrepancy: {
-    label: "Fee Discrepancy",
-    color: "bg-purple-100 text-purple-700",
-  },
-  pricing_mismatch: {
-    label: "Pricing Mismatch",
-    color: "bg-pink-100 text-pink-700",
-  },
-  other: {
-    label: "Other",
-    color: "bg-slate-100 text-slate-700",
-  },
-};
+// formatCurrency + categoryConfig come from the centralized config
 
 export function AnomalyDetailDialog({
   anomaly,
@@ -81,14 +37,10 @@ export function AnomalyDetailDialog({
           {/* Category & Confidence */}
           <div className="flex items-center gap-2">
             <Badge
-              variant="secondary"
-              className={
-                categoryConfig[anomaly.category]?.color ??
-                categoryConfig.other.color
-              }
+              variant="outline"
+              className={(categoryConfig[anomaly.category] ?? categoryConfig.other).badgeClass}
             >
-              {categoryConfig[anomaly.category]?.label ??
-                categoryConfig.other.label}
+              {(categoryConfig[anomaly.category] ?? categoryConfig.other).label}
             </Badge>
             <Badge
               variant={
