@@ -27,16 +27,16 @@ type AnomalyTableProps = {
   anomalies: Anomaly[];
 };
 
-const statusConfig: Record<string, { label: string; color: string }> = {
-  detected: { label: "Detected", color: "bg-[#EF4444] text-white" },
-  in_progress: { label: "In Progress", color: "bg-[#F59E0B] text-white" },
-  recovered: { label: "Recovered", color: "bg-[#15803D] text-white" },
+const statusConfig: Record<string, { label: string; textColor: string }> = {
+  detected: { label: "Detected", textColor: "text-[#EF4444]" },
+  in_progress: { label: "In Progress", textColor: "text-[#F59E0B]" },
+  recovered: { label: "Recovered", textColor: "text-[#15803D]" },
 };
 
-const confidenceLabelMap: Record<string, string> = {
-  high: "High",
-  medium: "Medium",
-  low: "Low",
+const confidenceConfig: Record<string, { label: string; bgColor: string; textColor: string }> = {
+  high: { label: "High", bgColor: "bg-[#DCFCE7]", textColor: "text-[#166534]" }, // Green-100 bg, green-800 text
+  medium: { label: "Medium", bgColor: "bg-[#FEF3C7]", textColor: "text-[#92400E]" }, // Amber-100 bg, amber-800 text
+  low: { label: "Low", bgColor: "bg-[#F1F5F9]", textColor: "text-[#475569]" }, // Slate-100 bg, slate-600 text
 };
 
 export function AnomalyTable({ anomalies }: AnomalyTableProps) {
@@ -171,12 +171,12 @@ export function AnomalyTable({ anomalies }: AnomalyTableProps) {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent border-[#E7E5E4]">
-                <TableHead className="text-sm font-medium text-[#0A0A0A]">Category</TableHead>
-                <TableHead className="text-sm font-medium text-[#0A0A0A]">Customer ID</TableHead>
-                <TableHead className="text-sm font-medium text-[#0A0A0A]">Status</TableHead>
-                <TableHead className="text-sm font-medium text-[#0A0A0A]">Confidence</TableHead>
-                <TableHead className="text-right text-sm font-medium text-[#0A0A0A]">Annual Impact</TableHead>
-                <TableHead className="w-[120px]"></TableHead>
+                <TableHead className="text-sm font-normal text-[#0A0A0A] w-[180px]">Category</TableHead>
+                <TableHead className="text-sm font-normal text-[#0A0A0A] w-[200px]">Customer ID</TableHead>
+                <TableHead className="text-sm font-normal text-[#0A0A0A] w-[140px]">Status</TableHead>
+                <TableHead className="text-sm font-normal text-[#0A0A0A] w-[140px]">Confidence</TableHead>
+                <TableHead className="text-right text-sm font-normal text-[#0A0A0A] w-[160px]">Annual Impact</TableHead>
+                <TableHead className="w-[100px]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -190,35 +190,35 @@ export function AnomalyTable({ anomalies }: AnomalyTableProps) {
                 currentAnomalies.map((anomaly) => {
                   const config = categoryConfig[anomaly.category] || categoryConfig.other;
                   const status = statusConfig[anomaly.status || "detected"] || statusConfig.detected;
-                  const confidenceLabel = confidenceLabelMap[anomaly.confidence] || anomaly.confidence;
+                  const confidence = confidenceConfig[anomaly.confidence] || confidenceConfig.low;
 
                   return (
                     <TableRow key={anomaly.id} className="border-[#E7E5E4]">
-                      <TableCell>
+                      <TableCell className="w-[180px]">
                         <Badge className={`${config.badgeClass} border-transparent`}>
                           {config.label}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-mono text-sm text-[#78716C]">
+                      <TableCell className="font-mono text-sm text-[#78716C] w-[200px]">
                         {anomaly.customer_id?.slice(0, 16) ?? "—"}
                       </TableCell>
-                      <TableCell>
-                        <Badge className={`${status.color} border-transparent`}>
+                      <TableCell className="w-[140px]">
+                        <span className={`text-sm font-normal ${status.textColor}`}>
                           {status.label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm font-medium text-[#0A0A0A]">
-                          {confidenceLabel}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right font-semibold text-[#0A0A0A]">
+                      <TableCell className="w-[140px]">
+                        <span className={`inline-block px-2 py-1 rounded text-xs font-normal ${confidence.bgColor} ${confidence.textColor}`}>
+                          {confidence.label}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-normal text-[#0A0A0A] w-[160px]">
                         {formatCurrency(anomaly.annual_impact)}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="w-[100px]">
                         <button
                           onClick={() => setSelectedAnomaly(anomaly)}
-                          className="text-sm font-medium text-[#0A0A0A] underline hover:text-[#78716C] transition-colors"
+                          className="text-xs font-normal text-[#0A0A0A] underline hover:text-[#78716C] transition-colors"
                         >
                           View details
                         </button>
@@ -233,13 +233,13 @@ export function AnomalyTable({ anomalies }: AnomalyTableProps) {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between text-sm text-[#78716C]">
+          <div className="flex items-center justify-between text-sm font-normal text-[#78716C]">
             <div>
               Showing {startIndex + 1} to {Math.min(endIndex, filteredAnomalies.length)} of{" "}
               {filteredAnomalies.length} anomalies
             </div>
             <div className="flex items-center gap-4">
-              <span className="font-medium text-[#0A0A0A]">
+              <span className="font-normal text-[#0A0A0A]">
                 Page {currentPage} of {totalPages}
               </span>
               <div className="flex items-center gap-2">

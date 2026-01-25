@@ -264,22 +264,22 @@ const AuditDetailPage = async ({ params }: AuditDetailPageProps) => {
 
       {/* Tabs */}
       <Tabs defaultValue="overview" className="space-y-6">
-        <TabsList className="bg-transparent border-b border-slate-200 rounded-none p-0 h-auto">
+        <TabsList className="inline-flex bg-transparent border-b border-slate-200 rounded-none p-0 h-auto w-auto">
           <TabsTrigger
             value="overview"
-            className="rounded-none bg-transparent border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3 shadow-none"
+            className="inline-flex items-center justify-center whitespace-nowrap rounded-none bg-transparent border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3 shadow-none ring-offset-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
           >
             Overview
           </TabsTrigger>
           <TabsTrigger
             value="needs-action"
-            className="rounded-none bg-transparent border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3 shadow-none"
+            className="inline-flex items-center justify-center whitespace-nowrap rounded-none bg-transparent border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3 shadow-none ring-offset-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
           >
             Needs action
           </TabsTrigger>
           <TabsTrigger
             value="all-anomalies"
-            className="rounded-none bg-transparent border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3 shadow-none"
+            className="inline-flex items-center justify-center whitespace-nowrap rounded-none bg-transparent border-b-2 border-transparent data-[state=active]:border-slate-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3 shadow-none ring-offset-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
           >
             All anomalies
           </TabsTrigger>
